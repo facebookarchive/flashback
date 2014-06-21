@@ -1,0 +1,5 @@
+*.pyc
+PROFILER_OUTPUT
+OPLOG_OUTPUT
+OUTPUT
+config.py

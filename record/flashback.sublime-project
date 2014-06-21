@@ -1,0 +1,29 @@
+{
+  "folders": [
+    {
+      "follow_symlinks": true,
+        "path": "."
+    }
+  ],
+  "settings": {
+    "sublimeautopep8": {
+      "max-line-length": 79,
+      "format_on_save": false,
+      "show_output_panel": true,
+      // show panel with message: no issues to fixed
+      "show_empty_panel": false,
+      "max-threads": 5,
+      // show Format/Preview menu items only for views
+      // with syntax from `syntax_list`
+      // value is base filename of the .tmLanguage syntax files
+      "syntax_list": ["Python"],
+
+      // Behaviour for right click context menu (Format/Preview PEP8)
+      // "always": menu appears always, even folder doesn't contain *.py files
+      // "never":  menu never appears
+      // "ifneed": menu appears only if path or childs contain *.py file
+      "file_menu_behaviour": "ifneed",
+      "file_menu_search_depth": 3  // max search depth, uses for 'ifneed' mode
+    }
+  }
+}
