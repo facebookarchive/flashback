@@ -8,6 +8,7 @@ import (
 type OpsExecutor struct {
 	session        *mgo.Session
 	statsCollector IStatsCollector
+
 	// keep track of the results retrieved by find(). For verification purpose
 	// only.
 	lastResult interface{}

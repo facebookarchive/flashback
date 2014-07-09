@@ -15,7 +15,13 @@ const (
 	Command OpType = "command"
 )
 
-var AllOpTypes []OpType
+var AllOpTypes []OpType = []OpType{
+	Insert,
+	Update,
+	Remove,
+	Query,
+	Command,
+}
 
 // Op represents a MongoDB operation that contains enough details to be
 // replayed.
@@ -28,14 +34,4 @@ type Op struct {
 	Timestamp time.Time
 	// The details of this op, which may vary from different op types.
 	Content Document
-}
-
-func init() {
-	AllOpTypes = []OpType{
-		Insert,
-		Update,
-		Remove,
-		Query,
-		Command,
-	}
 }

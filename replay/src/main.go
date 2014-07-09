@@ -17,11 +17,13 @@ func PanicOnError(err error) {
 	}
 }
 
-var ops_filename string
-var url string
-var workers int
-var maxOps int
-var style string
+var (
+	ops_filename string
+	url          string
+	workers      int
+	maxOps       int
+	style        string
+)
 
 func init() {
 	flag.StringVar(&ops_filename, "ops_filename", "",
@@ -103,7 +105,7 @@ func main() {
 	statsCollectorList := make([]*StatsCollector, workers)
 	for i := 0; i < workers; i++ {
 		statsCollectorList[i] = NewStatsCollector()
-		statsCollectorList[i].EnableLatencySampling(sampleRate, latencyChan)
+		statsCollectorList[i].SampleLatencies(sampleRate, latencyChan)
 		go fetch(i, statsCollectorList[i])
 	}
 
