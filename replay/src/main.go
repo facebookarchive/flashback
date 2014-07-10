@@ -112,13 +112,13 @@ func main() {
 
 	// Periodically report execution status
 	go func() {
-		StatsAnalyzer := NewStatsAnalyzer(statsCollectorList, &opsExecuted,
+		statsAnalyzer := NewStatsAnalyzer(statsCollectorList, &opsExecuted,
 			latencyChan, int(sampleRate*float64(maxOps)))
 		toFloat := func(nano int64) float64 {
 			return float64(nano) / float64(1e6)
 		}
 		report := func() {
-			status := StatsAnalyzer.GetStatus()
+			status := statsAnalyzer.GetStatus()
 			log.Printf("Executed %d ops, %.2f ops/sec", opsExecuted,
 				status.OpsPerSec)
 			for _, opType := range AllOpTypes {
