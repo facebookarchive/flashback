@@ -19,12 +19,16 @@ type OpsReader interface {
 	// already been read, or there is any error occurred.
 	// TODO change from Document to Op
 	Next() *Op
+
 	// How many ops are read so far
 	OpsRead() int
+
 	// Have all the ops been read?
 	AllLoaded() bool
+
 	// indicate the latest error occurs when reading ops.
 	Err() error
+
 	Close()
 }
 

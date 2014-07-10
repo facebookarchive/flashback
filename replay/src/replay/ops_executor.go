@@ -5,25 +5,45 @@ import (
 	"labix.org/v2/mgo"
 )
 
+var (
+	NotSupported = errors.New("op type not supported")
+)
+
+type execute func(content Document, collection *mgo.Collection) error
+
 type OpsExecutor struct {
 	session        *mgo.Session
 	statsCollector IStatsCollector
 
 	// keep track of the results retrieved by find(). For verification purpose
 	// only.
-	lastResult interface{}
+	lastResult  interface{}
+	subExecutes map[OpType]execute
 }
 
 func OpsExecutorWithStats(session *mgo.Session,
 	statsCollector IStatsCollector) *OpsExecutor {
-	return &OpsExecutor{session: session, statsCollector: statsCollector}
+	e := &OpsExecutor{
+		session:        session,
+		statsCollector: statsCollector,
+	}
+
+	e.subExecutes = map[OpType]execute{
+		Query:         e.execQuery,
+		Insert:        e.execInsert,
+		Update:        e.execUpdate,
+		Remove:        e.execRemove,
+		Count:         e.execCount,
+		FindAndModify: e.execFindAndModify,
+	}
+	return e
 }
 
 func NewOpsExecutor(session *mgo.Session) *OpsExecutor {
 	return OpsExecutorWithStats(session, new(NullStatsCollector))
 }
 
-func (executor *OpsExecutor) ExecQuery(
+func (e *OpsExecutor) execQuery(
 	content Document, coll *mgo.Collection) error {
 	query := coll.Find(content["query"])
 	result := []Document{}
@@ -36,68 +56,74 @@ func (executor *OpsExecutor) ExecQuery(
 		query.Skip(ntoskip)
 	}
 	err := query.All(&result)
-	executor.lastResult = &result
+	e.lastResult = &result
 	return err
 }
 
-func (executor *OpsExecutor) ExecInsert(
-	content Document, coll *mgo.Collection) error {
+func (e *OpsExecutor) execInsert(content Document, coll *mgo.Collection) error {
 	return coll.Insert(content["o"])
 }
 
-func (executor *OpsExecutor) ExecUpdate(
-	content Document, coll *mgo.Collection) error {
+func (e *OpsExecutor) execUpdate(content Document, coll *mgo.Collection) error {
 	return coll.Update(content["query"], content["updateobj"])
 }
 
-func (executor *OpsExecutor) ExecRemove(
-	content Document, coll *mgo.Collection) error {
+func (e *OpsExecutor) execRemove(content Document, coll *mgo.Collection) error {
 	return coll.Remove(content["query"])
 }
 
-func (executor *OpsExecutor) ExecCommand(
-	content Document, db *mgo.Database) error {
-	cmd := content["command"].(map[string]interface{})
-	if cmd["findandmodify"] != nil {
-		result := Document{}
-		coll_name := cmd["findandmodify"].(string)
-		change := mgo.Change{
-			Update: cmd["update"].(map[string]interface{}),
-		}
-		_, err := db.C(coll_name).Find(cmd["query"]).Apply(change, result)
-		return err
-	} else if cmd["count"] != nil {
-		coll_name := cmd["count"].(string)
-		_, err := db.C(coll_name).Count()
-		return err
+func (e *OpsExecutor) execCount(content Document, coll *mgo.Collection) error {
+	_, err := coll.Count()
+	return err
+}
+
+func (e *OpsExecutor) execFindAndModify(content Document, coll *mgo.Collection) error {
+	var result Document
+	change := mgo.Change{Update: content["update"].(map[string]interface{})}
+	_, err := coll.Find(content["query"]).Apply(change, result)
+	return err
+}
+
+// We only support handful op types. This function helps us to process supported
+// ops in a universal way.
+//
+// We do not canonicalize the ops in OpsReader because we hope ops reader to do
+// its job honestly and the consumer of these ops decide how to further process
+// the original ops.
+func canonicalizeOp(op *Op) *Op {
+	if op.Type != Command {
+		return op
 	}
+
+	cmd := op.Content["command"].(map[string]interface{})
+
+	for _, name := range []string{"findandmodify", "count"} {
+		collName, exist := cmd[name]
+		if !exist {
+			continue
+		}
+
+		op.Type = OpType("command." + name)
+		op.Collection = collName.(string)
+		op.Content = cmd
+
+		return op
+	}
+
 	return nil
 }
 
-func (executor *OpsExecutor) Execute(op *Op) error {
-	executor.statsCollector.StartOp(op.Type)
-	defer executor.statsCollector.EndOp()
+func (e *OpsExecutor) Execute(op *Op) error {
+	op = canonicalizeOp(op)
+	if op == nil {
+		return NotSupported
+	}
 
-	db := executor.session.DB(op.Database)
+	e.statsCollector.StartOp(op.Type)
+	defer e.statsCollector.EndOp()
+
 	content := op.Content
-	// "command" ops requires some special treatments.
-	if op.Type == "command" {
-		return executor.ExecCommand(content, db)
-	}
+	coll := e.session.DB(op.Database).C(op.Collection)
 
-	coll := db.C(op.Collection)
-	switch op.Type {
-	case "insert":
-		return executor.ExecInsert(content, coll)
-	case "update":
-		return executor.ExecUpdate(content, coll)
-	case "remove":
-		return executor.ExecRemove(content, coll)
-	case "query":
-		return executor.ExecQuery(content, coll)
-	default:
-		return errors.New("Unsupported op type " + string(op.Type))
-	}
-
-	return nil
+	return e.subExecutes[op.Type](content, coll)
 }

@@ -8,11 +8,15 @@ type Document map[string]interface{}
 type OpType string
 
 const (
-	Insert  OpType = "insert"
-	Update  OpType = "update"
-	Remove  OpType = "remove"
-	Query   OpType = "query"
-	Command OpType = "command"
+	Insert OpType = "insert"
+	Update OpType = "update"
+	Remove OpType = "remove"
+	Query  OpType = "query"
+
+	// Commands
+	Command       OpType = "command"
+	Count         OpType = "command.count"
+	FindAndModify OpType = "command.findandmodify"
 )
 
 var AllOpTypes []OpType = []OpType{
@@ -20,7 +24,8 @@ var AllOpTypes []OpType = []OpType{
 	Update,
 	Remove,
 	Query,
-	Command,
+	Count,
+	FindAndModify,
 }
 
 // Op represents a MongoDB operation that contains enough details to be

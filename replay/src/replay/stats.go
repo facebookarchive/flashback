@@ -13,6 +13,7 @@ type Latency struct {
 // Collect the stats during op execution.
 type IStatsCollector interface {
 	StartOp(opType OpType)
+
 	EndOp()
 
 	// How many ops have been captured.
@@ -59,12 +60,17 @@ func NewStatsCollector() *StatsCollector {
 }
 
 func (s *StatsCollector) StartOp(opType OpType) {
-	if s.sampleRate == 1 || rand.Float64() < s.sampleRate {
+	s.total++
+
+	if s.sampleRate == 0 {
+		return
+	}
+
+	if s.sampleRate == 1.0 || rand.Float64() < s.sampleRate {
 		now := time.Now()
 		s.epoch = &now
 		s.lastOp = &opType
 	}
-	s.total++
 }
 
 func (s *StatsCollector) EndOp() {
