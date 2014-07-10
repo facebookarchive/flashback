@@ -5,22 +5,17 @@ import (
 	"time"
 )
 
-type StatsAnalyser struct {
-	statsCollectors []*StatsCollector
-	opsExecuted     *int64
-	latencyChan     chan Latency
-	latencies       map[OpType][]int64
-	epoch           time.Time
-	lastEndPos      map[OpType]int
-}
-
 const (
 	AllTime    = "all_time"
 	SINCE_LAST = "since_last"
 )
 
-var LatencyPercentiles []int
+var (
+	latencyPercentiles = []int{50, 60, 70, 80, 90, 95, 99, 100}
+	emptyLatencies     = make([]int64, len(latencyPercentiles))
+)
 
+// Percentiles
 const (
 	P50  = iota
 	P60  = iota
@@ -32,8 +27,7 @@ const (
 	P100 = iota
 )
 
-func NewStatsAnalyser(statsCollectors []*StatsCollector, opsExecuted *int64,
-	latencyChan chan Latency, latenciesSize int) *StatsAnalyser {
+func NewStatsAnalyzer(statsCollectors []*StatsCollector, opsExecuted *int64, latencyChan chan Latency, latenciesSize int) *StatsAnalyzer {
 	latencies := map[OpType][]int64{}
 	lastEndPos := map[OpType]int{}
 
@@ -54,7 +48,7 @@ func NewStatsAnalyser(statsCollectors []*StatsCollector, opsExecuted *int64,
 		}
 	}()
 
-	return &StatsAnalyser{
+	return &StatsAnalyzer{
 		statsCollectors: statsCollectors,
 		opsExecuted:     opsExecuted,
 		latencyChan:     latencyChan,
@@ -64,6 +58,7 @@ func NewStatsAnalyser(statsCollectors []*StatsCollector, opsExecuted *int64,
 	}
 }
 
+// ExecutionStatus encapsulates the aggregated information for the execution
 type ExecutionStatus struct {
 	OpsExecuted        int64
 	OpsPerSec          float64
@@ -74,7 +69,16 @@ type ExecutionStatus struct {
 	TypeOpsSec         map[OpType]float64
 }
 
-func (self *StatsAnalyser) GetStatus() *ExecutionStatus {
+type StatsAnalyzer struct {
+	statsCollectors []*StatsCollector
+	opsExecuted     *int64
+	latencyChan     chan Latency
+	latencies       map[OpType][]int64
+	epoch           time.Time
+	lastEndPos      map[OpType]int
+}
+
+func (self *StatsAnalyzer) GetStatus() *ExecutionStatus {
 	// Basics
 	duration := time.Now().Sub(self.epoch)
 	opsPerSec := 0.0
@@ -116,31 +120,22 @@ func (self *StatsAnalyser) GetStatus() *ExecutionStatus {
 	return &status
 }
 
-type Int64Slice []int64
+// Sorting facilities
+type int64Slice []int64
 
-func (p Int64Slice) Len() int           { return len(p) }
-func (p Int64Slice) Less(i, j int) bool { return p[i] < p[j] }
-func (p Int64Slice) Swap(i, j int)      { p[i], p[j] = p[j], p[i] }
-
-// An inefficient but easy to implement way to get the latencies info.
-var emptyLatencies []int64
+func (p int64Slice) Len() int           { return len(p) }
+func (p int64Slice) Less(i, j int) bool { return p[i] < p[j] }
+func (p int64Slice) Swap(i, j int)      { p[i], p[j] = p[j], p[i] }
 
 func CalculateLatencyStats(latencies []int64) []int64 {
-	result := make([]int64, 0, len(LatencyPercentiles))
+	result := make([]int64, 0, len(latencyPercentiles))
 	length := len(latencies)
 	if length == 0 {
 		return emptyLatencies
 	}
-	sort.Sort(Int64Slice(latencies))
-	for _, perc := range LatencyPercentiles {
+	sort.Sort(int64Slice(latencies))
+	for _, perc := range latencyPercentiles {
 		result = append(result, latencies[(length-1)*perc/100])
 	}
 	return result
-}
-
-func init() {
-	LatencyPercentiles = []int{
-		50, 60, 70, 80, 90, 95, 99, 100,
-	}
-	emptyLatencies = make([]int64, len(LatencyPercentiles))
 }

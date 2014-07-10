@@ -5,12 +5,12 @@ import (
 	"time"
 )
 
+// Latency of the mongo ops
 type Latency struct {
 	OpType  OpType
 	Latency time.Duration
 }
 
-// Collect the stats during op execution.
 type IStatsCollector interface {
 	StartOp(opType OpType)
 
@@ -132,7 +132,7 @@ func CombineStats(statsList ...*StatsCollector) *StatsCollector {
 	return newStats
 }
 
-// A Stats collector that does nothing.
+// NullStatsCollector is a placeholder that does nothing.
 type NullStatsCollector struct{}
 
 func (e *NullStatsCollector) StartOp(opType OpType)                                           {}

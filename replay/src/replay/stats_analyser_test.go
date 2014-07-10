@@ -7,19 +7,19 @@ import (
 )
 
 // Hook up gocheck into the "go test" runner.
-func TestStatsAnalyser(t *testing.T) {
+func TestStatsAnalyzer(t *testing.T) {
 	TestingT(t)
 }
 
-type TestStatsAnalyserSuite struct{}
+type TestStatsAnalyzerSuite struct{}
 
-var _ = Suite(&TestStatsAnalyserSuite{})
+var _ = Suite(&TestStatsAnalyzerSuite{})
 
-func (s *TestStatsAnalyserSuite) TestBasics(c *C) {
+func (s *TestStatsAnalyzerSuite) TestBasics(c *C) {
 	opsExecuted := int64(0)
 	latencyChan := make(chan Latency)
 
-	analyser := NewStatsAnalyser(
+	analyser := NewStatsAnalyzer(
 		[]*StatsCollector{}, &opsExecuted, latencyChan, 1000,
 	)
 
@@ -38,11 +38,11 @@ func (s *TestStatsAnalyserSuite) TestBasics(c *C) {
 	}
 }
 
-func (s *TestStatsAnalyserSuite) TestLatencies(c *C) {
+func (s *TestStatsAnalyzerSuite) TestLatencies(c *C) {
 	opsExecuted := int64(0)
 	latencyChan := make(chan Latency)
 
-	analyser := NewStatsAnalyser(
+	analyser := NewStatsAnalyzer(
 		[]*StatsCollector{}, &opsExecuted, latencyChan, 1000,
 	)
 

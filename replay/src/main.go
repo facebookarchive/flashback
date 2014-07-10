@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-func PanicOnError(err error) {
+func panicOnError(err error) {
 	if err != nil {
 		panic(err)
 	}
@@ -62,20 +62,20 @@ func main() {
 	// Will enable system threads to make sure all cpus can be well utilized.
 	runtime.GOMAXPROCS(100)
 	err := parseFlags()
-	PanicOnError(err)
+	panicOnError(err)
 
 	// Prepare to dispatch ops
 	var reader OpsReader
 	var opsChan chan *Op
 	if style == "stress" {
 		err, reader = NewFileByLineOpsReader(opsFilename)
-		PanicOnError(err)
+		panicOnError(err)
 		opsChan = NewBestEffortOpsDispatcher(reader, maxOps)
 	} else {
 		// TODO NewCyclicOpsReader: do we really want to make it cyclic?
 		reader = NewCyclicOpsReader(func() OpsReader {
 			err, reader := NewFileByLineOpsReader(opsFilename)
-			PanicOnError(err)
+			panicOnError(err)
 			return reader
 		})
 		opsChan = NewByTimeOpsDispatcher(reader, maxOps)
@@ -89,7 +89,7 @@ func main() {
 	fetch := func(id int, statsCollector IStatsCollector) {
 		log.Printf("Worker #%d report for duty\n", id)
 		session, err := mgo.Dial(url)
-		PanicOnError(err)
+		panicOnError(err)
 		defer session.Close()
 		exec := OpsExecutorWithStats(session, statsCollector)
 		for {
@@ -112,13 +112,13 @@ func main() {
 
 	// Periodically report execution status
 	go func() {
-		statsAnalyser := NewStatsAnalyser(statsCollectorList, &opsExecuted,
+		StatsAnalyzer := NewStatsAnalyzer(statsCollectorList, &opsExecuted,
 			latencyChan, int(sampleRate*float64(maxOps)))
 		toFloat := func(nano int64) float64 {
 			return float64(nano) / float64(1e6)
 		}
 		report := func() {
-			status := statsAnalyser.GetStatus()
+			status := StatsAnalyzer.GetStatus()
 			log.Printf("Executed %d ops, %.2f ops/sec", opsExecuted,
 				status.OpsPerSec)
 			for _, opType := range AllOpTypes {

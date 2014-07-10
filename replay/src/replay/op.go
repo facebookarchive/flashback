@@ -4,22 +4,25 @@ import (
 	"time"
 )
 
-type Document map[string]interface{}
+// OpType is the name of mongo op type
 type OpType string
 
-const (
-	Insert OpType = "insert"
-	Update OpType = "update"
-	Remove OpType = "remove"
-	Query  OpType = "query"
+// Document represents the json-like infromation of an op
+type Document map[string]interface{}
 
-	// Commands
+// Contains a list of mongo op types
+const (
+	Insert        OpType = "insert"
+	Update        OpType = "update"
+	Remove        OpType = "remove"
+	Query         OpType = "query"
 	Command       OpType = "command"
 	Count         OpType = "command.count"
 	FindAndModify OpType = "command.findandmodify"
 )
 
-var AllOpTypes []OpType = []OpType{
+// AllOpTypes specifies all supported op types
+var AllOpTypes = []OpType{
 	Insert,
 	Update,
 	Remove,
