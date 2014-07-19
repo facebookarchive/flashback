@@ -19,6 +19,9 @@ type OpsReader interface {
 	// already been read, or there is any error occurred.
 	// TODO change from Document to Op
 	Next() *Op
+	
+	// Allow skipping the first N ops in the source file
+	SkipOps(int) error
 
 	// How many ops are read so far
 	OpsRead() int
@@ -69,6 +72,31 @@ func NewFileByLineOpsReader(filename string) (error, *ByLineOpsReader) {
 	}
 	return nil, reader
 }
+
+func (loader *ByLineOpsReader) SkipOps(numSkipOps int) (error) {
+	// checkPoint value used when logging percentage of ops skipped
+	checkPoint := (numSkipOps / 20)
+	
+	for numSkipped := 0; numSkipped < numSkipOps; numSkipped++ {
+		// Print status every 5% of skipped ops
+		if (numSkipped % checkPoint == 0) {
+			log.Printf("%d ops skipped.\n", numSkipped)
+			
+		}
+		
+		_, err := loader.lineReader.ReadString('\n')
+
+		// Return if we get an error reading the error, or hit EOF 
+		if err != nil || err == io.EOF {
+			return err
+		}
+	}
+	
+	log.Printf("Done skipping %d ops.\n", numSkipOps)
+	
+	return nil
+}
+
 func (loader *ByLineOpsReader) Next() *Op {
 	// we may need to skip certain type of ops
 	for {

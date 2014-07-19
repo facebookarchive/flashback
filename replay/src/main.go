@@ -22,6 +22,7 @@ var (
 	url         string
 	workers     int
 	maxOps      int
+	numSkipOps     int
 	style       string
 	sampleRate  float64
 )
@@ -41,6 +42,9 @@ func init() {
 		"[Optional] Maximal amount of ops to be replayed from the "+
 			"ops_filename file. By setting it to `0`, replayer will "+
 			"replay all the ops.")
+	flag.IntVar(&numSkipOps, "numSkipOps", 0,
+		"[Optional] Skip first N ops. Useful for when the total ops in ops_filename" +
+		" exceeds available memory and you're running in stress mode.")
 	flag.Float64Var(&sampleRate, "sample_rate", 0.0, "sample ops for latency")
 }
 
@@ -70,12 +74,19 @@ func main() {
 	if style == "stress" {
 		err, reader = NewFileByLineOpsReader(opsFilename)
 		panicOnError(err)
+		if numSkipOps > 0 {
+			err = reader.SkipOps(numSkipOps)
+			panicOnError(err)
+		}
 		opsChan = NewBestEffortOpsDispatcher(reader, maxOps)
 	} else {
 		// TODO NewCyclicOpsReader: do we really want to make it cyclic?
 		reader = NewCyclicOpsReader(func() OpsReader {
-			err, reader := NewFileByLineOpsReader(opsFilename)
-			panicOnError(err)
+			err, reader := NewFileByLineOpsReader(opsFilename, numSkipOps)
+			if numSkipOps > 0 {
+				err = reader.SkipOps(numSkipOps)
+				panicOnError(err)
+			}
 			return reader
 		})
 		opsChan = NewByTimeOpsDispatcher(reader, maxOps)
