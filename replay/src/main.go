@@ -23,8 +23,14 @@ var (
 	workers     int
 	maxOps      int
 	numSkipOps     int
-	style       string
-	sampleRate  float64
+	socketTimeout	int64
+	style		string
+	sampleRate	float64
+)
+
+const (
+	// Set one minute timeout on mongo socket connections (nanoseconds) by default
+	DEFAULT_MGO_SOCKET_TIMEOUT=60000000000
 )
 
 func init() {
@@ -45,6 +51,7 @@ func init() {
 	flag.IntVar(&numSkipOps, "numSkipOps", 0,
 		"[Optional] Skip first N ops. Useful for when the total ops in ops_filename" +
 		" exceeds available memory and you're running in stress mode.")
+	flag.Int64Var(&socketTimeout, "socketTimeout", DEFAULT_MGO_SOCKET_TIMEOUT, "Mongo socket timeout in nanoseconds. Defaults to 60 seconds.")
 	flag.Float64Var(&sampleRate, "sample_rate", 0.0, "sample ops for latency")
 }
 
@@ -100,8 +107,11 @@ func main() {
 	opsExecuted := int64(0)
 	fetch := func(id int, statsCollector IStatsCollector) {
 		log.Printf("Worker #%d report for duty\n", id)
-		session, err := mgo.Dial(url)
+		
+		session, err := mgo.Dial(url)		
 		panicOnError(err)
+		session.SetSocketTimeout(time.Duration(socketTimeout))
+		
 		defer session.Close()
 		exec := OpsExecutorWithStats(session, statsCollector)
 		for {
