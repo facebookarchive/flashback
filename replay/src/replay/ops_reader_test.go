@@ -68,6 +68,26 @@ func CheckSkipOps(c *C, loader OpsReader) {
 	c.Assert(expectedOpsRead, Equals, 4)
 }
 
+func (s *TestFileByLineOpsReaderSuite) TestPruneEmptyUpdateObj(c *C) {
+	// Check findAndModify and update structures to ensure nil $unsets are removed
+	testJsonString := `{"query": {"$or": [{"_acl": {"$exists": false}}, {"_acl.*.w": true}], "_id": "YDHJwP5hFX"}, "updateobj": {"$set": {"_updated_at": {"$date": 1396457119032}}, "$unset": {}}, "ns": "appdata66.app_0939ec2a-b247-4485-b741-bfe069791305:Prize", "op": "update", "ts": {"$date": 1396457119032}}
+		{"query": {"$or": [{"_acl": {"$exists": false}}, {"_acl.*.w": true}], "_id": "YDHJwP5hFX"}, "updateobj": {"$set": {"_updated_at": {"$date": 1396457119032}}, "$unset": {}}, "ns": "appdata66.app_0939ec2a-b247-4485-b741-bfe069791305:Prize", "op": "update", "ts": {"$date": 1396457119032}}`
+	reader := bytes.NewReader([]byte(testJsonString))
+	err, loader := NewByLineOpsReader(reader)
+	c.Assert(err, Equals, nil)
+
+	for op := loader.Next(); op != nil; op = loader.Next() {
+		doc := op.Content
+		var updateMap map[string]interface{}
+		if op.Type == "command" {
+			updateMap = doc["command"].(map[string]interface{})["update"].(map[string]interface{})
+		} else if op.Type == "update" {
+			updateMap = doc["updateobj"].(map[string]interface{})
+		}
+		c.Assert(updateMap["$unset"], Equals, nil)
+	}
+}
+
 func (s *TestFileByLineOpsReaderSuite) TestFileByLineOpsReader(c *C) {
 	testJsonString :=
 		`{ "ts": {"$date" : 1396456709421}, "ns": "db.coll", "op": "insert", "o": {"logType1": "warning", "message": "m1"} }

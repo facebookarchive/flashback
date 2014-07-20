@@ -74,15 +74,15 @@ func NewFileByLineOpsReader(filename string) (error, *ByLineOpsReader) {
 }
 
 func (loader *ByLineOpsReader) SkipOps(numSkipOps int) (error) {
-	for numSkipped := 0; numSkipped < numSkipOps; numSkipped++ {		
+	for numSkipped := 0; numSkipped < numSkipOps; numSkipped++ {
 		_, err := loader.lineReader.ReadString('\n')
 
-		// Return if we get an error reading the error, or hit EOF 
+		// Return if we get an error reading the error, or hit EOF
 		if err != nil || err == io.EOF {
 			return err
 		}
 	}
-	
+
 	log.Printf("Done skipping %d ops.\n", numSkipOps)
 	
 	return nil
@@ -202,6 +202,45 @@ func normalizeObj(rawObj Document) {
 	} // map iteration
 }
 
+// Some operations are recorded with empty values for $set, $unset, and possibly $inc
+// When these are replayed against a mongo instance, they generate an error and do not execute
+// This method will detect and remove these empty blocks before the query is executed
+// A couple of examples are below
+// {"ns": "appdata68.$cmd", "command": {"query": {"$or": [{"_acl": {"$exists": false}}, {"_acl.*.w": true}], "_id": "5Npn4XbXVF"}, "findandmodify": "app_0ecb3ea0-a35a-4fa6-b1a8-2bf66ae160ff:_Installation", "update": {"$set": {"_updated_at": {"$date": 1396457187276}}, "$unset": {}, "$addToSet": {"channels": {"$each": ["", "v5420"]}}}, "new": true}, "ts": {"$date": 1396457187283}, "op": "command"}
+// {"query": {"$or": [{"_acl": {"$exists": false}}, {"_acl.*.w": true}], "_id": "YDHJwP5hFX"}, "updateobj": {"$set": {"_updated_at": {"$date": 1396457119032}}, "$unset": {}}, "ns": "appdata66.app_0939ec2a-b247-4485-b741-bfe069791305:Prize", "op": "update", "ts": {"$date": 1396457119032}}
+func PruneEmptyUpdateObj(doc *Document, opType string) {
+	tempDoc := *doc
+	var targetMap map[string]interface{}
+
+	if opType == "command" {
+		targetMap = tempDoc["command"].(map[string]interface{})["update"].(map[string]interface{})
+	} else if opType == "update" {
+		targetMap = tempDoc["updateobj"].(map[string]interface{})
+	} else {
+		return
+	}
+
+	operators := [3]string {"$set", "$unset", "$inc"}
+
+	for _, operator := range operators {
+		if targetMap[operator] != nil {
+			checkMap := targetMap[operator].(map[string]interface{})
+			if len(checkMap) == 0 {
+				log.Printf("deleting %s", operator)
+				delete(targetMap, operator)
+			}
+		}
+	}
+
+	if opType == "command" {
+		tempDoc["command"] = targetMap
+	} else if opType == "update" {
+		tempDoc["updateobj"] = targetMap
+	}
+
+	*doc = tempDoc
+}
+
 func makeOp(rawDoc Document) *Op {
 	opType := rawDoc["op"].(string)
 	ts := rawDoc["ts"].(time.Time)
@@ -225,8 +264,11 @@ func makeOp(rawDoc Document) *Op {
 			"query":     rawDoc["query"],
 			"updateobj": rawDoc["updateobj"],
 		}
+
+		PruneEmptyUpdateObj(&content, opType)
 	case "command":
 		content = Document{"command": rawDoc["command"]}
+		PruneEmptyUpdateObj(&content, opType)
 	case "remove":
 		content = Document{"query": rawDoc["query"]}
 	default:
