@@ -62,7 +62,7 @@ func (s *TestStatsAnalyzerSuite) TestLatencies(c *C) {
 	for _, opType := range AllOpTypes {
 		sinceLast := status.SinceLastLatencies[opType]
 		allTime := status.AllTimeLatencies[opType]
-		for i, perc := range LatencyPercentiles {
+		for i, perc := range latencyPercentiles {
 			c.Assert(sinceLast[i], Equals, int64(perc+start))
 			c.Assert(allTime[i], Equals, int64(perc+start))
 		}
@@ -84,7 +84,7 @@ func (s *TestStatsAnalyzerSuite) TestLatencies(c *C) {
 	for _, opType := range AllOpTypes {
 		sinceLast := status.SinceLastLatencies[opType]
 		allTime := status.AllTimeLatencies[opType]
-		for i, perc := range LatencyPercentiles {
+		for i, perc := range latencyPercentiles {
 			c.Assert(sinceLast[i], Equals, int64(perc+start))
 		}
 		c.Assert(allTime[len(allTime)-1], Equals, int64(start+100))
