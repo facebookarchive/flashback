@@ -49,6 +49,25 @@ func CheckOpsReader(c *C, loader OpsReader) {
 	c.Assert(expectedOpsRead, Equals, 5)
 }
 
+func CheckSkipOps(c *C, loader OpsReader) {
+
+	expectedOpsRead := 0
+	const startingTs = 1396456709420
+	
+	// Skip a single op
+	loader.SkipOps(1)
+	
+	// Read all remaining ops
+	for op := loader.Next(); op != nil; op = loader.Next() {
+		expectedOpsRead += 1
+		c.Assert(op, Not(Equals), nil)
+		c.Assert(loader.OpsRead(), Equals, expectedOpsRead)
+	}
+	
+	// Verify that only 4 ops are read, since we skipped one
+	c.Assert(expectedOpsRead, Equals, 4)
+}
+
 func (s *TestFileByLineOpsReaderSuite) TestFileByLineOpsReader(c *C) {
 	testJsonString :=
 		`{ "ts": {"$date" : 1396456709421}, "ns": "db.coll", "op": "insert", "o": {"logType1": "warning", "message": "m1"} }
@@ -60,6 +79,12 @@ func (s *TestFileByLineOpsReaderSuite) TestFileByLineOpsReader(c *C) {
 	err, loader := NewByLineOpsReader(reader)
 	c.Assert(err, Equals, nil)
 	CheckOpsReader(c, loader)
+	
+	// Reset the reader so that we can test SkipOps
+	reader = bytes.NewReader([]byte(testJsonString))
+	err, loader = NewByLineOpsReader(reader)
+	c.Assert(err, Equals, nil)
+	CheckSkipOps(c, loader)
 }
 
 func CheckTime(c *C, pythonTime float64, goTime time.Time) {

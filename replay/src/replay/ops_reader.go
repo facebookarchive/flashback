@@ -74,16 +74,7 @@ func NewFileByLineOpsReader(filename string) (error, *ByLineOpsReader) {
 }
 
 func (loader *ByLineOpsReader) SkipOps(numSkipOps int) (error) {
-	// checkPoint value used when logging percentage of ops skipped
-	checkPoint := (numSkipOps / 20)
-	
-	for numSkipped := 0; numSkipped < numSkipOps; numSkipped++ {
-		// Print status every 5% of skipped ops
-		if (numSkipped % checkPoint == 0) {
-			log.Printf("%d ops skipped.\n", numSkipped)
-			
-		}
-		
+	for numSkipped := 0; numSkipped < numSkipOps; numSkipped++ {		
 		_, err := loader.lineReader.ReadString('\n')
 
 		// Return if we get an error reading the error, or hit EOF 
@@ -287,6 +278,10 @@ func (self *CyclicOpsReader) OpsRead() int {
 
 func (self *CyclicOpsReader) AllLoaded() bool {
 	return false
+}
+
+func (self *CyclicOpsReader) SkipOps(numSkipOps int) error {
+	return self.reader.SkipOps(numSkipOps)
 }
 
 func (self *CyclicOpsReader) Err() error {

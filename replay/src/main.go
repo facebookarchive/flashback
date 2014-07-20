@@ -82,13 +82,14 @@ func main() {
 	} else {
 		// TODO NewCyclicOpsReader: do we really want to make it cyclic?
 		reader = NewCyclicOpsReader(func() OpsReader {
-			err, reader := NewFileByLineOpsReader(opsFilename, numSkipOps)
-			if numSkipOps > 0 {
-				err = reader.SkipOps(numSkipOps)
-				panicOnError(err)
-			}
+			err, reader := NewFileByLineOpsReader(opsFilename)
+			panicOnError(err)
 			return reader
 		})
+		if numSkipOps > 0 {
+			err = reader.SkipOps(numSkipOps)
+			panicOnError(err)
+		}
 		opsChan = NewByTimeOpsDispatcher(reader, maxOps)
 	}
 
