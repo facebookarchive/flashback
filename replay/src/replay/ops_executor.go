@@ -78,7 +78,7 @@ func (e *OpsExecutor) execCount(content Document, coll *mgo.Collection) error {
 }
 
 func (e *OpsExecutor) execFindAndModify(content Document, coll *mgo.Collection) error {
-	var result Document
+	result := Document{}
 	change := mgo.Change{Update: content["update"].(map[string]interface{})}
 	_, err := coll.Find(content["query"]).Apply(change, result)
 	return err
