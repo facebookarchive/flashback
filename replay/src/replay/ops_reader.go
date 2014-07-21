@@ -212,7 +212,12 @@ func PruneEmptyUpdateObj(doc Document, opType string) {
 	var updateObj map[string]interface{}
 
 	if opType == "command" {
-		updateObj = doc["command"].(map[string]interface{})["update"].(map[string]interface{})
+		// only do this for findandmodify
+		command := doc["command"].(map[string]interface{})
+		if command["findandmodify"] == nil {
+			return
+		}
+		updateObj = command["update"].(map[string]interface{})
 	} else if opType == "update" {
 		updateObj = doc["updateobj"].(map[string]interface{})
 	} else {
@@ -228,12 +233,6 @@ func PruneEmptyUpdateObj(doc Document, opType string) {
 				delete(updateObj, operator)
 			}
 		}
-	}
-
-	if opType == "command" {
-		doc["command"] = updateObj
-	} else if opType == "update" {
-		doc["updateobj"] = updateObj
 	}
 }
 
