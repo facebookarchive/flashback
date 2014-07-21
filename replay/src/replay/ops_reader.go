@@ -208,14 +208,13 @@ func normalizeObj(rawObj Document) {
 // A couple of examples are below
 // {"ns": "appdata68.$cmd", "command": {"query": {"$or": [{"_acl": {"$exists": false}}, {"_acl.*.w": true}], "_id": "5Npn4XbXVF"}, "findandmodify": "app_0ecb3ea0-a35a-4fa6-b1a8-2bf66ae160ff:_Installation", "update": {"$set": {"_updated_at": {"$date": 1396457187276}}, "$unset": {}, "$addToSet": {"channels": {"$each": ["", "v5420"]}}}, "new": true}, "ts": {"$date": 1396457187283}, "op": "command"}
 // {"query": {"$or": [{"_acl": {"$exists": false}}, {"_acl.*.w": true}], "_id": "YDHJwP5hFX"}, "updateobj": {"$set": {"_updated_at": {"$date": 1396457119032}}, "$unset": {}}, "ns": "appdata66.app_0939ec2a-b247-4485-b741-bfe069791305:Prize", "op": "update", "ts": {"$date": 1396457119032}}
-func PruneEmptyUpdateObj(doc *Document, opType string) {
-	tempDoc := *doc
-	var targetMap map[string]interface{}
+func PruneEmptyUpdateObj(doc Document, opType string) {
+	var updateObj map[string]interface{}
 
 	if opType == "command" {
-		targetMap = tempDoc["command"].(map[string]interface{})["update"].(map[string]interface{})
+		updateObj = doc["command"].(map[string]interface{})["update"].(map[string]interface{})
 	} else if opType == "update" {
-		targetMap = tempDoc["updateobj"].(map[string]interface{})
+		updateObj = doc["updateobj"].(map[string]interface{})
 	} else {
 		return
 	}
@@ -223,22 +222,19 @@ func PruneEmptyUpdateObj(doc *Document, opType string) {
 	operators := [3]string {"$set", "$unset", "$inc"}
 
 	for _, operator := range operators {
-		if targetMap[operator] != nil {
-			checkMap := targetMap[operator].(map[string]interface{})
+		if updateObj[operator] != nil {
+			checkMap := updateObj[operator].(map[string]interface{})
 			if len(checkMap) == 0 {
-				log.Printf("deleting %s", operator)
-				delete(targetMap, operator)
+				delete(updateObj, operator)
 			}
 		}
 	}
 
 	if opType == "command" {
-		tempDoc["command"] = targetMap
+		doc["command"] = updateObj
 	} else if opType == "update" {
-		tempDoc["updateobj"] = targetMap
+		doc["updateobj"] = updateObj
 	}
-
-	*doc = tempDoc
 }
 
 func makeOp(rawDoc Document) *Op {
@@ -265,10 +261,10 @@ func makeOp(rawDoc Document) *Op {
 			"updateobj": rawDoc["updateobj"],
 		}
 
-		PruneEmptyUpdateObj(&content, opType)
+		PruneEmptyUpdateObj(content, opType)
 	case "command":
 		content = Document{"command": rawDoc["command"]}
-		PruneEmptyUpdateObj(&content, opType)
+		PruneEmptyUpdateObj(content, opType)
 	case "remove":
 		content = Document{"query": rawDoc["query"]}
 	default:
