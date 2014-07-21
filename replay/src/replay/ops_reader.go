@@ -19,6 +19,9 @@ type OpsReader interface {
 	// already been read, or there is any error occurred.
 	// TODO change from Document to Op
 	Next() *Op
+	
+	// Allow skipping the first N ops in the source file
+	SkipOps(int) error
 
 	// How many ops are read so far
 	OpsRead() int
@@ -69,6 +72,22 @@ func NewFileByLineOpsReader(filename string) (error, *ByLineOpsReader) {
 	}
 	return nil, reader
 }
+
+func (loader *ByLineOpsReader) SkipOps(numSkipOps int) (error) {
+	for numSkipped := 0; numSkipped < numSkipOps; numSkipped++ {
+		_, err := loader.lineReader.ReadString('\n')
+
+		// Return if we get an error reading the error, or hit EOF
+		if err != nil || err == io.EOF {
+			return err
+		}
+	}
+
+	log.Printf("Done skipping %d ops.\n", numSkipOps)
+	
+	return nil
+}
+
 func (loader *ByLineOpsReader) Next() *Op {
 	// we may need to skip certain type of ops
 	for {
@@ -183,6 +202,40 @@ func normalizeObj(rawObj Document) {
 	} // map iteration
 }
 
+// Some operations are recorded with empty values for $set, $unset, and possibly $inc
+// When these are replayed against a mongo instance, they generate an error and do not execute
+// This method will detect and remove these empty blocks before the query is executed
+// A couple of examples are below
+// {"ns": "appdata68.$cmd", "command": {"query": {"$or": [{"_acl": {"$exists": false}}, {"_acl.*.w": true}], "_id": "5Npn4XbXVF"}, "findandmodify": "app_0ecb3ea0-a35a-4fa6-b1a8-2bf66ae160ff:_Installation", "update": {"$set": {"_updated_at": {"$date": 1396457187276}}, "$unset": {}, "$addToSet": {"channels": {"$each": ["", "v5420"]}}}, "new": true}, "ts": {"$date": 1396457187283}, "op": "command"}
+// {"query": {"$or": [{"_acl": {"$exists": false}}, {"_acl.*.w": true}], "_id": "YDHJwP5hFX"}, "updateobj": {"$set": {"_updated_at": {"$date": 1396457119032}}, "$unset": {}}, "ns": "appdata66.app_0939ec2a-b247-4485-b741-bfe069791305:Prize", "op": "update", "ts": {"$date": 1396457119032}}
+func PruneEmptyUpdateObj(doc Document, opType string) {
+	var updateObj map[string]interface{}
+
+	if opType == "command" {
+		// only do this for findandmodify
+		command := doc["command"].(map[string]interface{})
+		if command["findandmodify"] == nil {
+			return
+		}
+		updateObj = command["update"].(map[string]interface{})
+	} else if opType == "update" {
+		updateObj = doc["updateobj"].(map[string]interface{})
+	} else {
+		return
+	}
+
+	operators := [3]string {"$set", "$unset", "$inc"}
+
+	for _, operator := range operators {
+		if updateObj[operator] != nil {
+			checkMap := updateObj[operator].(map[string]interface{})
+			if len(checkMap) == 0 {
+				delete(updateObj, operator)
+			}
+		}
+	}
+}
+
 func makeOp(rawDoc Document) *Op {
 	opType := rawDoc["op"].(string)
 	ts := rawDoc["ts"].(time.Time)
@@ -206,8 +259,11 @@ func makeOp(rawDoc Document) *Op {
 			"query":     rawDoc["query"],
 			"updateobj": rawDoc["updateobj"],
 		}
+
+		PruneEmptyUpdateObj(content, opType)
 	case "command":
 		content = Document{"command": rawDoc["command"]}
+		PruneEmptyUpdateObj(content, opType)
 	case "remove":
 		content = Document{"query": rawDoc["query"]}
 	default:
@@ -259,6 +315,10 @@ func (self *CyclicOpsReader) OpsRead() int {
 
 func (self *CyclicOpsReader) AllLoaded() bool {
 	return false
+}
+
+func (self *CyclicOpsReader) SkipOps(numSkipOps int) error {
+	return self.reader.SkipOps(numSkipOps)
 }
 
 func (self *CyclicOpsReader) Err() error {

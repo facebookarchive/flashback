@@ -75,6 +75,24 @@ func (s *TestExecutorSuite) TestExecution(c *C) {
 	c.Assert((*findResult)[0]["logType"].(string), Equals, "hooo")
 	findResult = nil
 
+	// findAndModify
+	famCmd := fmt.Sprintf(
+		`{"ts": {"$date": 1396456709472}, `+
+		`"ns": "%s.$cmd", "command": {"query": {"_id": {"$oid": "533c3d03c23fffd217678ee8"}}, `+
+		`"findandmodify": "%s", `+
+		//`"update": {"$set": {"logType": "foobar"}}}, "op": "command"}`, test_db, test_collection)
+		`"update": {"$set": {"logType": "foobar"}}}, "op": "command"}`, test_db, test_collection)
+	cmd, err = parseJson(famCmd)
+	c.Assert(err, IsNil)
+	err = exec.Execute(makeOp(cmd))
+	c.Assert(err, IsNil)
+
+	err = exec.Execute(findOp)
+	c.Assert(err, IsNil)
+	findResult = exec.lastResult.(*[]Document)
+	c.Assert((*findResult)[0]["logType"].(string), Equals, "foobar")
+	findResult = nil
+
 	// Remove
 	removeCmd := fmt.Sprintf(
 		`{"query": {"_id": {"$oid": "533c3d03c23fffd217678ee8"}}, `+

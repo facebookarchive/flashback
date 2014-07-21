@@ -22,8 +22,16 @@ var (
 	url         string
 	workers     int
 	maxOps      int
-	style       string
-	sampleRate  float64
+	numSkipOps     int
+	socketTimeout	int64
+	style		string
+	sampleRate	float64
+	verbose		bool
+)
+
+const (
+	// Set one minute timeout on mongo socket connections (nanoseconds) by default
+	DEFAULT_MGO_SOCKET_TIMEOUT=60000000000
 )
 
 func init() {
@@ -41,7 +49,13 @@ func init() {
 		"[Optional] Maximal amount of ops to be replayed from the "+
 			"ops_filename file. By setting it to `0`, replayer will "+
 			"replay all the ops.")
-	flag.Float64Var(&sampleRate, "sample_rate", 0.0, "sample ops for latency")
+	flag.IntVar(&numSkipOps, "numSkipOps", 0,
+		"[Optional] Skip first N ops. Useful for when the total ops in ops_filename" +
+		" exceeds available memory and you're running in stress mode.")
+	flag.Int64Var(&socketTimeout, "socketTimeout", DEFAULT_MGO_SOCKET_TIMEOUT, "Mongo socket timeout in nanoseconds. Defaults to 60 seconds.")
+	flag.Float64Var(&sampleRate, "sample_rate", 0.0, "sample ops for latency")	
+	// TODO: define a real error logger
+	flag.BoolVar(&verbose, "verbose", false, "[Optional] Print op errors and other verbose information to stdout.")
 }
 
 func parseFlags() error {
@@ -70,6 +84,10 @@ func main() {
 	if style == "stress" {
 		err, reader = NewFileByLineOpsReader(opsFilename)
 		panicOnError(err)
+		if numSkipOps > 0 {
+			err = reader.SkipOps(numSkipOps)
+			panicOnError(err)
+		}
 		opsChan = NewBestEffortOpsDispatcher(reader, maxOps)
 	} else {
 		// TODO NewCyclicOpsReader: do we really want to make it cyclic?
@@ -78,6 +96,10 @@ func main() {
 			panicOnError(err)
 			return reader
 		})
+		if numSkipOps > 0 {
+			err = reader.SkipOps(numSkipOps)
+			panicOnError(err)
+		}
 		opsChan = NewByTimeOpsDispatcher(reader, maxOps)
 	}
 
@@ -88,8 +110,11 @@ func main() {
 	opsExecuted := int64(0)
 	fetch := func(id int, statsCollector IStatsCollector) {
 		log.Printf("Worker #%d report for duty\n", id)
-		session, err := mgo.Dial(url)
+		
+		session, err := mgo.Dial(url)		
 		panicOnError(err)
+		session.SetSocketTimeout(time.Duration(socketTimeout))
+		
 		defer session.Close()
 		exec := OpsExecutorWithStats(session, statsCollector)
 		for {
@@ -97,7 +122,11 @@ func main() {
 			if op == nil {
 				break
 			}
-			exec.Execute(op)
+			err := exec.Execute(op)
+			
+			if verbose == true && err != nil {
+				log.Println(err.Error())
+			}
 			atomic.AddInt64(&opsExecuted, 1)
 		}
 		exit <- 1
