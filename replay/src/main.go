@@ -26,6 +26,7 @@ var (
 	socketTimeout	int64
 	style		string
 	sampleRate	float64
+	verbose		bool
 )
 
 const (
@@ -52,7 +53,9 @@ func init() {
 		"[Optional] Skip first N ops. Useful for when the total ops in ops_filename" +
 		" exceeds available memory and you're running in stress mode.")
 	flag.Int64Var(&socketTimeout, "socketTimeout", DEFAULT_MGO_SOCKET_TIMEOUT, "Mongo socket timeout in nanoseconds. Defaults to 60 seconds.")
-	flag.Float64Var(&sampleRate, "sample_rate", 0.0, "sample ops for latency")
+	flag.Float64Var(&sampleRate, "sample_rate", 0.0, "sample ops for latency")	
+	// TODO: define a real error logger
+	flag.BoolVar(&verbose, "verbose", false, "[Optional] Print op errors and other verbose information to stdout.")
 }
 
 func parseFlags() error {
@@ -119,7 +122,11 @@ func main() {
 			if op == nil {
 				break
 			}
-			exec.Execute(op)
+			err := exec.Execute(op)
+			
+			if verbose == true && err != nil {
+				log.Println(err.Error())
+			}
 			atomic.AddInt64(&opsExecuted, 1)
 		}
 		exit <- 1
