@@ -111,6 +111,10 @@ func main() {
 	if style == "stress" {
 		err, reader = NewFileByLineOpsReader(opsFilename)
 		panicOnError(err)
+		if startTime > 0 {
+			_,err = reader.SetStartTime(startTime)
+			panicOnError(err)
+		}
 		if numSkipOps > 0 {
 			err = reader.SkipOps(numSkipOps)
 			panicOnError(err)
@@ -123,6 +127,10 @@ func main() {
 			panicOnError(err)
 			return reader
 		})
+		if startTime > 0 {
+			_, err = reader.SetStartTime(startTime)
+			panicOnError(err)
+		}
 		if numSkipOps > 0 {
 			err = reader.SkipOps(numSkipOps)
 			panicOnError(err)
