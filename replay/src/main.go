@@ -72,6 +72,30 @@ func parseFlags() error {
 	return nil
 }
 
+func RetryOnSocketFailure(block func() error, session *mgo.Session) error {
+	err := block()
+	if err == nil {
+		return nil
+	}
+
+	switch err.(type) {
+		case *mgo.QueryError:
+			return err
+		case *mgo.LastError:
+			return err
+	}
+
+	if err == mgo.ErrNotFound {
+		return err
+	}
+
+	// Otherwise it's probably a socket error so we refresh the connection,
+	// and try again
+	session.Refresh()
+	log.Printf("retrying mongo query after error: %s", err)
+	return block()
+}
+
 func main() {
 	// Will enable system threads to make sure all cpus can be well utilized.
 	runtime.GOMAXPROCS(100)
@@ -122,7 +146,11 @@ func main() {
 			if op == nil {
 				break
 			}
-			err := exec.Execute(op)
+			block := func() error {
+				err := exec.Execute(op)
+				return err
+			}
+			err := RetryOnSocketFailure(block, session)
 			
 			if verbose == true && err != nil {
 				log.Println(err.Error())
