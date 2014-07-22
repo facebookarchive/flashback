@@ -27,6 +27,7 @@ var (
 	style		string
 	sampleRate	float64
 	verbose		bool
+	startTime	int64
 )
 
 const (
@@ -56,6 +57,8 @@ func init() {
 	flag.Float64Var(&sampleRate, "sample_rate", 0.0, "sample ops for latency")	
 	// TODO: define a real error logger
 	flag.BoolVar(&verbose, "verbose", false, "[Optional] Print op errors and other verbose information to stdout.")
+	flag.Int64Var(&startTime, "start_time", 0, "[Optional] Provide a unix timestamp (i.e. 1396456709419)"+
+		    "indicating the first op that you want to run. Otherwise, play from the top." )
 }
 
 func parseFlags() error {

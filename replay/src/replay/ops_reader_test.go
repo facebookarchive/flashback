@@ -50,9 +50,7 @@ func CheckOpsReader(c *C, loader OpsReader) {
 }
 
 func CheckSkipOps(c *C, loader OpsReader) {
-
 	expectedOpsRead := 0
-	const startingTs = 1396456709420
 	
 	// Skip a single op
 	loader.SkipOps(1)
@@ -66,6 +64,22 @@ func CheckSkipOps(c *C, loader OpsReader) {
 	
 	// Verify that only 4 ops are read, since we skipped one
 	c.Assert(expectedOpsRead, Equals, 4)
+}
+
+func CheckSetStartTime(c *C, loader OpsReader) {
+	expectedOpsRead := 0
+	numSkipped, err := loader.SetStartTime(1396456709424)
+	c.Assert(err, Equals, nil)
+	c.Assert(numSkipped, Equals, int64(4))
+
+	for op := loader.Next(); op != nil; op = loader.Next() {
+		expectedOpsRead += 1
+		c.Assert(op, Not(Equals), nil)
+		c.Assert(loader.OpsRead(), Equals, expectedOpsRead)
+	}
+
+	// Verify that only 4 ops are read, since we skipped one
+	c.Assert(expectedOpsRead, Equals, 1)
 }
 
 func (s *TestFileByLineOpsReaderSuite) TestPruneEmptyUpdateObj(c *C) {
@@ -105,6 +119,12 @@ func (s *TestFileByLineOpsReaderSuite) TestFileByLineOpsReader(c *C) {
 	err, loader = NewByLineOpsReader(reader)
 	c.Assert(err, Equals, nil)
 	CheckSkipOps(c, loader)
+
+	// Reset the reader so that we can test SetStartTime
+	reader = bytes.NewReader([]byte(testJsonString))
+	err, loader = NewByLineOpsReader(reader)
+	c.Assert(err, Equals, nil)
+	CheckSetStartTime(c, loader)
 }
 
 func CheckTime(c *C, pythonTime float64, goTime time.Time) {
@@ -119,7 +139,6 @@ func (s *TestFileByLineOpsReaderSuite) TestSimplenormalizeObj(c *C) {
 	}
 	normalizeObj(objWithTime)
 	CheckTime(c, ts, objWithTime["ts"].(time.Time))
-
 }
 
 func (s *TestFileByLineOpsReaderSuite) TestComplexnormalizeObj(c *C) {

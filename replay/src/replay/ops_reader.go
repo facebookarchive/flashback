@@ -23,6 +23,11 @@ type OpsReader interface {
 	// Allow skipping the first N ops in the source file
 	SkipOps(int) error
 
+	// Start at a specific time in the set of ops
+	// Return an error if we get to EOF without finding an op
+	// Can be used with SkipOps, but you should call SkipOps after SetStartTime
+	SetStartTime(int64) (int64, error)
+
 	// How many ops are read so far
 	OpsRead() int
 
@@ -86,6 +91,36 @@ func (loader *ByLineOpsReader) SkipOps(numSkipOps int) (error) {
 	log.Printf("Done skipping %d ops.\n", numSkipOps)
 	
 	return nil
+}
+
+func (loader *ByLineOpsReader) SetStartTime(startTime int64) (int64, error) {
+	var numSkipped int64
+	searchTime := time.Unix(startTime / 1000, startTime % 1000 * 1000000)
+
+	for true {
+		// The nature of this function is that it will discard the first op
+		jsonText, err := loader.lineReader.ReadString('\n')
+		numSkipped++
+
+		// Return if we get an error reading the error, or hit EOF
+		if err != nil || err == io.EOF {
+			return numSkipped, err
+		}
+
+		rawObj, err := parseJson(jsonText)
+		if err != nil {
+			return numSkipped, err
+		}
+
+		timestamp := rawObj["ts"].(time.Time)
+		if timestamp.After(searchTime) || timestamp.Equal(searchTime) {
+			actualTime := timestamp
+			log.Printf("Skipped %d ops to begin at timestamp %d.", numSkipped, actualTime)
+			return numSkipped, nil
+		}
+	}
+
+	return numSkipped, errors.New("no ops found after specified start_time")
 }
 
 func (loader *ByLineOpsReader) Next() *Op {
@@ -319,6 +354,10 @@ func (self *CyclicOpsReader) AllLoaded() bool {
 
 func (self *CyclicOpsReader) SkipOps(numSkipOps int) error {
 	return self.reader.SkipOps(numSkipOps)
+}
+
+func (self *CyclicOpsReader) SetStartTime(startTime int64) (int64, error) {
+	return self.reader.SetStartTime(startTime)
 }
 
 func (self *CyclicOpsReader) Err() error {
