@@ -18,21 +18,21 @@ func panicOnError(err error) {
 }
 
 var (
-	opsFilename string
-	url         string
-	workers     int
-	maxOps      int
-	numSkipOps     int
-	socketTimeout	int64
-	style		string
-	sampleRate	float64
-	verbose		bool
-	startTime	int64
+	maxOps        int
+	numSkipOps    int
+	opsFilename   string
+	sampleRate    float64
+	socketTimeout int64
+	startTime     int64
+	style         string
+	url           string
+	verbose       bool
+	workers       int
 )
 
 const (
 	// Set one minute timeout on mongo socket connections (nanoseconds) by default
-	DEFAULT_MGO_SOCKET_TIMEOUT=60000000000
+	DEFAULT_MGO_SOCKET_TIMEOUT = 60000000000
 )
 
 func init() {
@@ -51,14 +51,14 @@ func init() {
 			"ops_filename file. By setting it to `0`, replayer will "+
 			"replay all the ops.")
 	flag.IntVar(&numSkipOps, "numSkipOps", 0,
-		"[Optional] Skip first N ops. Useful for when the total ops in ops_filename" +
-		" exceeds available memory and you're running in stress mode.")
+		"[Optional] Skip first N ops. Useful for when the total ops in ops_filename"+
+			" exceeds available memory and you're running in stress mode.")
 	flag.Int64Var(&socketTimeout, "socketTimeout", DEFAULT_MGO_SOCKET_TIMEOUT, "Mongo socket timeout in nanoseconds. Defaults to 60 seconds.")
-	flag.Float64Var(&sampleRate, "sample_rate", 0.0, "sample ops for latency")	
+	flag.Float64Var(&sampleRate, "sample_rate", 0.0, "sample ops for latency")
 	// TODO: define a real error logger
 	flag.BoolVar(&verbose, "verbose", false, "[Optional] Print op errors and other verbose information to stdout.")
 	flag.Int64Var(&startTime, "start_time", 0, "[Optional] Provide a unix timestamp (i.e. 1396456709419)"+
-		    "indicating the first op that you want to run. Otherwise, play from the top." )
+		"indicating the first op that you want to run. Otherwise, play from the top.")
 }
 
 func parseFlags() error {
@@ -82,10 +82,10 @@ func RetryOnSocketFailure(block func() error, session *mgo.Session) error {
 	}
 
 	switch err.(type) {
-		case *mgo.QueryError:
-			return err
-		case *mgo.LastError:
-			return err
+	case *mgo.QueryError:
+		return err
+	case *mgo.LastError:
+		return err
 	}
 
 	if err == mgo.ErrNotFound {
@@ -112,7 +112,7 @@ func main() {
 		err, reader = NewFileByLineOpsReader(opsFilename)
 		panicOnError(err)
 		if startTime > 0 {
-			_,err = reader.SetStartTime(startTime)
+			_, err = reader.SetStartTime(startTime)
 			panicOnError(err)
 		}
 		if numSkipOps > 0 {
@@ -145,11 +145,11 @@ func main() {
 	opsExecuted := int64(0)
 	fetch := func(id int, statsCollector IStatsCollector) {
 		log.Printf("Worker #%d report for duty\n", id)
-		
-		session, err := mgo.Dial(url)		
+
+		session, err := mgo.Dial(url)
 		panicOnError(err)
 		session.SetSocketTimeout(time.Duration(socketTimeout))
-		
+
 		defer session.Close()
 		exec := OpsExecutorWithStats(session, statsCollector)
 		for {
@@ -162,7 +162,6 @@ func main() {
 				return err
 			}
 			err := RetryOnSocketFailure(block, session)
-			
 			if verbose == true && err != nil {
 				log.Println(err.Error())
 			}
@@ -193,7 +192,8 @@ func main() {
 				allTime := status.AllTimeLatencies[opType]
 				sinceLast := status.SinceLastLatencies[opType]
 				log.Printf("  Op type: %s, count: %d, ops/sec: %.2f",
-					opType, status.Counts[opType], status.TypeOpsSec[opType])
+					opType, status.Counts[opType],
+					status.TypeOpsSec[opType]*float64(workers))
 				template := "   %s: P50: %.2fms, P70: %.2fms, P90: %.2fms, " +
 					"P95 %.2fms, P99 %.2fms, Max %.2fms\n"
 				log.Printf(template, "Total", toFloat(allTime[P50]),

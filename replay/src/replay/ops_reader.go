@@ -12,14 +12,14 @@ import (
 	"time"
 )
 
-// Reads the ops from a source and present a interface for consumers to fetch
-// these ops sequentially.
+// OpsReader Reads the ops from a source and present a interface for consumers
+// to fetch these ops sequentially.
 type OpsReader interface {
 	// Move to next op and return it. Nil will be returned if the last ops had
 	// already been read, or there is any error occurred.
 	// TODO change from Document to Op
 	Next() *Op
-	
+
 	// Allow skipping the first N ops in the source file
 	SkipOps(int) error
 
@@ -78,7 +78,7 @@ func NewFileByLineOpsReader(filename string) (error, *ByLineOpsReader) {
 	return nil, reader
 }
 
-func (loader *ByLineOpsReader) SkipOps(numSkipOps int) (error) {
+func (loader *ByLineOpsReader) SkipOps(numSkipOps int) error {
 	for numSkipped := 0; numSkipped < numSkipOps; numSkipped++ {
 		_, err := loader.lineReader.ReadString('\n')
 
@@ -89,7 +89,7 @@ func (loader *ByLineOpsReader) SkipOps(numSkipOps int) (error) {
 	}
 
 	log.Printf("Done skipping %d ops.\n", numSkipOps)
-	
+
 	return nil
 }
 
@@ -259,7 +259,7 @@ func PruneEmptyUpdateObj(doc Document, opType string) {
 		return
 	}
 
-	operators := [3]string {"$set", "$unset", "$inc"}
+	operators := [3]string{"$set", "$unset", "$inc"}
 
 	for _, operator := range operators {
 		if updateObj[operator] != nil {

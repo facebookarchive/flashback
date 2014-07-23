@@ -40,7 +40,7 @@ func OpsExecutorWithStats(session *mgo.Session,
 }
 
 func NewOpsExecutor(session *mgo.Session) *OpsExecutor {
-	return OpsExecutorWithStats(session, new(NullStatsCollector))
+	return OpsExecutorWithStats(session, NewNullStatsCollector())
 }
 
 func (e *OpsExecutor) execQuery(

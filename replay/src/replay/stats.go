@@ -133,12 +133,17 @@ func CombineStats(statsList ...*StatsCollector) *StatsCollector {
 }
 
 // NullStatsCollector is a placeholder that does nothing.
-type NullStatsCollector struct{}
+type nullStatsCollector struct{}
 
-func (e *NullStatsCollector) StartOp(opType OpType)                                           {}
-func (e *NullStatsCollector) EndOp()                                                          {}
-func (e *NullStatsCollector) SampleLatencies(sampleRate float64, latencyChannel chan Latency) {}
-func (e *NullStatsCollector) Count(opType OpType) int64                                       { return 0 }
-func (e *NullStatsCollector) TotalTime(opType OpType) time.Duration                           { return 0 }
-func (e *NullStatsCollector) OpsSec(opType OpType) float64                                    { return 0 }
-func (e *NullStatsCollector) LatencyInMs(opType OpType) float64                               { return 0 }
+func (e *nullStatsCollector) StartOp(opType OpType)                                           {}
+func (e *nullStatsCollector) EndOp()                                                          {}
+func (e *nullStatsCollector) SampleLatencies(sampleRate float64, latencyChannel chan Latency) {}
+func (e *nullStatsCollector) Count(opType OpType) int64                                       { return 0 }
+func (e *nullStatsCollector) TotalTime(opType OpType) time.Duration                           { return 0 }
+func (e *nullStatsCollector) OpsSec(opType OpType) float64                                    { return 0 }
+func (e *nullStatsCollector) LatencyInMs(opType OpType) float64                               { return 0 }
+
+// NewNullStatsCollector makes a dumb stats collector that does nothing.
+func NewNullStatsCollector() IStatsCollector {
+	return &nullStatsCollector{}
+}

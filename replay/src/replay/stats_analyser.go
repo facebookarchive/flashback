@@ -27,7 +27,11 @@ const (
 	P100 = iota
 )
 
-func NewStatsAnalyzer(statsCollectors []*StatsCollector, opsExecuted *int64, latencyChan chan Latency, latenciesSize int) *StatsAnalyzer {
+func NewStatsAnalyzer(
+	statsCollectors []*StatsCollector,
+	opsExecuted *int64,
+	latencyChan chan Latency,
+	latenciesSize int) *StatsAnalyzer {
 	latencies := map[OpType][]int64{}
 	lastEndPos := map[OpType]int{}
 
