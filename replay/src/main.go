@@ -4,7 +4,6 @@ import (
 	"errors"
 	"flag"
 	"labix.org/v2/mgo"
-	"log"
 	. "replay"
 	"runtime"
 	"sync/atomic"
@@ -28,6 +27,9 @@ var (
 	url           string
 	verbose       bool
 	workers       int
+	stderr        string
+	stdout        string
+	logger        *Logger
 )
 
 const (
@@ -59,6 +61,9 @@ func init() {
 	flag.BoolVar(&verbose, "verbose", false, "[Optional] Print op errors and other verbose information to stdout.")
 	flag.Int64Var(&startTime, "start_time", 0, "[Optional] Provide a unix timestamp (i.e. 1396456709419)"+
 		"indicating the first op that you want to run. Otherwise, play from the top.")
+
+	flag.StringVar(&stderr, "stderr", "", "error/warning log messages will go to stderr")
+	flag.StringVar(&stderr, "stdout", "", "regular log messages will go to stderr")
 }
 
 func parseFlags() error {
@@ -71,6 +76,10 @@ func parseFlags() error {
 	}
 	if maxOps == 0 {
 		maxOps = 4294967295
+	}
+	var err error
+	if logger, err = NewLogger(stdout, stderr); err != nil {
+		return nil
 	}
 	return nil
 }
@@ -95,7 +104,7 @@ func RetryOnSocketFailure(block func() error, session *mgo.Session) error {
 	// Otherwise it's probably a socket error so we refresh the connection,
 	// and try again
 	session.Refresh()
-	log.Printf("retrying mongo query after error: %s", err)
+	logger.Error("retrying mongo query after error: ", err)
 	return block()
 }
 
@@ -109,7 +118,7 @@ func main() {
 	var reader OpsReader
 	var opsChan chan *Op
 	if style == "stress" {
-		err, reader = NewFileByLineOpsReader(opsFilename)
+		err, reader = NewFileByLineOpsReader(opsFilename, logger)
 		panicOnError(err)
 		if startTime > 0 {
 			_, err = reader.SetStartTime(startTime)
@@ -119,14 +128,14 @@ func main() {
 			err = reader.SkipOps(numSkipOps)
 			panicOnError(err)
 		}
-		opsChan = NewBestEffortOpsDispatcher(reader, maxOps)
+		opsChan = NewBestEffortOpsDispatcher(reader, maxOps, logger)
 	} else {
 		// TODO NewCyclicOpsReader: do we really want to make it cyclic?
 		reader = NewCyclicOpsReader(func() OpsReader {
-			err, reader := NewFileByLineOpsReader(opsFilename)
+			err, reader := NewFileByLineOpsReader(opsFilename, logger)
 			panicOnError(err)
 			return reader
-		})
+		}, logger)
 		if startTime > 0 {
 			_, err = reader.SetStartTime(startTime)
 			panicOnError(err)
@@ -135,7 +144,7 @@ func main() {
 			err = reader.SkipOps(numSkipOps)
 			panicOnError(err)
 		}
-		opsChan = NewByTimeOpsDispatcher(reader, maxOps)
+		opsChan = NewByTimeOpsDispatcher(reader, maxOps, logger)
 	}
 
 	latencyChan := make(chan Latency, workers)
@@ -144,7 +153,7 @@ func main() {
 	exit := make(chan int)
 	opsExecuted := int64(0)
 	fetch := func(id int, statsCollector IStatsCollector) {
-		log.Printf("Worker #%d report for duty\n", id)
+		logger.Infof("Worker #%d report for duty\n", id)
 
 		session, err := mgo.Dial(url)
 		panicOnError(err)
@@ -163,12 +172,12 @@ func main() {
 			}
 			err := RetryOnSocketFailure(block, session)
 			if verbose == true && err != nil {
-				log.Println(err.Error())
+				logger.Error(err)
 			}
 			atomic.AddInt64(&opsExecuted, 1)
 		}
 		exit <- 1
-		log.Printf("Worker #%d done!\n", id)
+		logger.Infof("Worker #%d done!\n", id)
 	}
 	statsCollectorList := make([]*StatsCollector, workers)
 	for i := 0; i < workers; i++ {
@@ -186,21 +195,21 @@ func main() {
 		}
 		report := func() {
 			status := statsAnalyzer.GetStatus()
-			log.Printf("Executed %d ops, %.2f ops/sec", opsExecuted,
+			logger.Infof("Executed %d ops, %.2f ops/sec", opsExecuted,
 				status.OpsPerSec)
 			for _, opType := range AllOpTypes {
 				allTime := status.AllTimeLatencies[opType]
 				sinceLast := status.SinceLastLatencies[opType]
-				log.Printf("  Op type: %s, count: %d, ops/sec: %.2f",
+				logger.Infof("  Op type: %s, count: %d, ops/sec: %.2f",
 					opType, status.Counts[opType],
 					status.TypeOpsSec[opType]*float64(workers))
 				template := "   %s: P50: %.2fms, P70: %.2fms, P90: %.2fms, " +
 					"P95 %.2fms, P99 %.2fms, Max %.2fms\n"
-				log.Printf(template, "Total", toFloat(allTime[P50]),
+				logger.Infof(template, "Total", toFloat(allTime[P50]),
 					toFloat(allTime[P70]), toFloat(allTime[P90]),
 					toFloat(allTime[P95]), toFloat(allTime[P99]),
 					toFloat(allTime[P100]))
-				log.Printf(template, "Last ", toFloat(sinceLast[P50]),
+				logger.Infof(template, "Last ", toFloat(sinceLast[P50]),
 					toFloat(sinceLast[P70]), toFloat(sinceLast[P90]),
 					toFloat(sinceLast[P95]), toFloat(sinceLast[P99]),
 					toFloat(sinceLast[P100]))

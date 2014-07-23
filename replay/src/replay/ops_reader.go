@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"labix.org/v2/mgo/bson"
-	"log"
 	"os"
 	"strings"
 	"time"
@@ -51,24 +50,26 @@ type ByLineOpsReader struct {
 	err        error
 	opsRead    int
 	closeFunc  func()
+	logger     *Logger
 }
 
-func NewByLineOpsReader(reader io.Reader) (error, *ByLineOpsReader) {
+func NewByLineOpsReader(reader io.Reader, logger *Logger) (error, *ByLineOpsReader) {
 	return nil, &ByLineOpsReader{
 		lineReader: bufio.NewReaderSize(reader, 5*1024*1024),
 		err:        nil,
 		opsRead:    0,
+		logger:     logger,
 	}
 }
 
 // func NewCyclicOpsReader(func() ops_reader_maker *OpsReader) (error, OpsReader)
 
-func NewFileByLineOpsReader(filename string) (error, *ByLineOpsReader) {
+func NewFileByLineOpsReader(filename string, logger *Logger) (error, *ByLineOpsReader) {
 	file, err := os.Open(filename)
 	if err != nil {
 		return err, nil
 	}
-	err, reader := NewByLineOpsReader(file)
+	err, reader := NewByLineOpsReader(file, logger)
 	if err != nil {
 		return err, reader
 	}
@@ -88,14 +89,13 @@ func (loader *ByLineOpsReader) SkipOps(numSkipOps int) error {
 		}
 	}
 
-	log.Printf("Done skipping %d ops.\n", numSkipOps)
-
+	loader.logger.Infof("Done skipping %d ops.\n", numSkipOps)
 	return nil
 }
 
 func (loader *ByLineOpsReader) SetStartTime(startTime int64) (int64, error) {
 	var numSkipped int64
-	searchTime := time.Unix(startTime / 1000, startTime % 1000 * 1000000)
+	searchTime := time.Unix(startTime/1000, startTime%1000*1000000)
 
 	for true {
 		// The nature of this function is that it will discard the first op
@@ -115,7 +115,7 @@ func (loader *ByLineOpsReader) SetStartTime(startTime int64) (int64, error) {
 		timestamp := rawObj["ts"].(time.Time)
 		if timestamp.After(searchTime) || timestamp.Equal(searchTime) {
 			actualTime := timestamp
-			log.Printf("Skipped %d ops to begin at timestamp %d.", numSkipped, actualTime)
+			loader.logger.Infof("Skipped %d ops to begin at timestamp %d.", numSkipped, actualTime)
 			return numSkipped, nil
 		}
 	}
@@ -312,9 +312,10 @@ type CyclicOpsReader struct {
 	reader       OpsReader
 	previousRead int
 	err          error
+	logger       *Logger
 }
 
-func NewCyclicOpsReader(maker func() OpsReader) *CyclicOpsReader {
+func NewCyclicOpsReader(maker func() OpsReader, logger *Logger) *CyclicOpsReader {
 	reader := maker()
 	if reader == nil {
 		return nil
@@ -325,13 +326,14 @@ func NewCyclicOpsReader(maker func() OpsReader) *CyclicOpsReader {
 		reader,
 		0,
 		nil,
+		logger,
 	}
 }
 
 func (self *CyclicOpsReader) Next() *Op {
 	var op *Op = nil
 	if op = self.reader.Next(); op == nil {
-		log.Println("Recycle starts")
+		self.logger.Info("Recycle starts")
 		self.previousRead += self.reader.OpsRead()
 		self.reader.Close()
 		self.reader = self.maker()
