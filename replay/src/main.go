@@ -136,6 +136,53 @@ func RetryOnSocketFailure(block func() error, session *mgo.Session) error {
 	return block()
 }
 
+func makeOpsChan(style string, opsFilename string, logger *Logger) (chan *Op, error) {
+	// Prepare to dispatch ops
+	var (
+		reader OpsReader
+		err    error
+	)
+
+	if style == "stress" {
+		err, reader = NewFileByLineOpsReader(opsFilename, logger)
+		if err != nil {
+			return nil, err
+		}
+
+		if startTime > 0 {
+			if _, err = reader.SetStartTime(startTime); err != nil {
+				return nil, err
+			}
+			return nil, err
+		}
+		if numSkipOps > 0 {
+			if err := reader.SkipOps(numSkipOps); err != nil {
+				return nil, err
+			}
+		}
+		return NewBestEffortOpsDispatcher(reader, maxOps, logger), nil
+	}
+
+	// TODO NewCyclicOpsReader: do we really want to make it cyclic?
+	reader = NewCyclicOpsReader(func() OpsReader {
+		err, reader := NewFileByLineOpsReader(opsFilename, logger)
+		panicOnError(err)
+		return reader
+	}, logger)
+
+	if startTime > 0 {
+		if _, err := reader.SetStartTime(startTime); err != nil {
+			return nil, err
+		}
+	}
+	if numSkipOps > 0 {
+		if err := reader.SkipOps(numSkipOps); err != nil {
+			return nil, err
+		}
+	}
+	return NewByTimeOpsDispatcher(reader, maxOps, logger), nil
+}
+
 func main() {
 	// Will enable system threads to make sure all cpus can be well utilized.
 	runtime.GOMAXPROCS(runtime.NumCPU())
@@ -143,38 +190,8 @@ func main() {
 	panicOnError(err)
 	defer logger.Close()
 
-	// Prepare to dispatch ops
-	var reader OpsReader
-	var opsChan chan *Op
-	if style == "stress" {
-		err, reader = NewFileByLineOpsReader(opsFilename, logger)
-		panicOnError(err)
-		if startTime > 0 {
-			_, err = reader.SetStartTime(startTime)
-			panicOnError(err)
-		}
-		if numSkipOps > 0 {
-			err = reader.SkipOps(numSkipOps)
-			panicOnError(err)
-		}
-		opsChan = NewBestEffortOpsDispatcher(reader, maxOps, logger)
-	} else {
-		// TODO NewCyclicOpsReader: do we really want to make it cyclic?
-		reader = NewCyclicOpsReader(func() OpsReader {
-			err, reader := NewFileByLineOpsReader(opsFilename, logger)
-			panicOnError(err)
-			return reader
-		}, logger)
-		if startTime > 0 {
-			_, err = reader.SetStartTime(startTime)
-			panicOnError(err)
-		}
-		if numSkipOps > 0 {
-			err = reader.SkipOps(numSkipOps)
-			panicOnError(err)
-		}
-		opsChan = NewByTimeOpsDispatcher(reader, maxOps, logger)
-	}
+	opsChan, err := makeOpsChan(style, opsFilename, logger)
+	panicOnError(err)
 
 	latencyChan := make(chan Latency, workers)
 
