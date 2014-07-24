@@ -16,6 +16,7 @@ type closeable interface {
 	Close() error
 }
 
+// NewLogger creates a new logger
 func NewLogger(stdout string, stderr string) (logger *Logger, err error) {
 	var (
 		stderrWriter = os.Stderr
@@ -64,6 +65,7 @@ func (l *Logger) Errorf(format string, v ...interface{}) {
 	l.stderr.Printf(format, v...)
 }
 
+// Close the underlying files
 func (l *Logger) Close() {
 	for _, c := range l.toClose {
 		c.Close()

@@ -5,11 +5,6 @@ import (
 	"time"
 )
 
-const (
-	AllTime    = "all_time"
-	SINCE_LAST = "since_last"
-)
-
 var (
 	latencyPercentiles = []int{50, 60, 70, 80, 90, 95, 99, 100}
 	emptyLatencies     = make([]int64, len(latencyPercentiles))
