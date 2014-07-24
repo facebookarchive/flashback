@@ -112,7 +112,7 @@ func parseFlags() error {
 	return nil
 }
 
-func RetryOnSocketFailure(block func() error, session *mgo.Session) error {
+func retryOnSocketFailure(block func() error, session *mgo.Session) error {
 	err := block()
 	if err == nil {
 		return nil
@@ -216,7 +216,7 @@ func main() {
 				err := exec.Execute(op)
 				return err
 			}
-			err := RetryOnSocketFailure(block, session)
+			err := retryOnSocketFailure(block, session)
 			if verbose == true && err != nil {
 				logger.Error(err)
 			}
