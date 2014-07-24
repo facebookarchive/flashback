@@ -67,9 +67,17 @@ After configuration, please simply run `python record.py`.
 Install `mgo` as it is the mongodb go driver.
 
 ### Command
+Basic options:
 
     go run main.go \
         --host=<hostname:[port]> \
         --style=[real|stress] \
         --ops_num=N \
-        --workers=WORKERS
+        --workers=<workers>
+        --sample_rate=<sample_rate> # sample_rate will be between (0.0, 1.0]. The default value is 1.0
+        
+
+Advanced options
+
+    --stdout=<filename>: all regular log messages will be written to this file
+    --stderr=<filename>: all error log messages will be wirtten to this file.
