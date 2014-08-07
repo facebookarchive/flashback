@@ -241,8 +241,8 @@ func main() {
 		}
 		report := func() {
 			status := statsAnalyzer.GetStatus()
-			logger.Infof("Executed %d ops, %.2f ops/sec", opsExecuted,
-				status.OpsPerSec)
+			logger.Infof("Executed %d ops, %.2f ops/sec (avg), %.2f ops/sec (last)", opsExecuted,
+				status.OpsPerSec, status.OpsPerSecLast)
 			for _, opType := range AllOpTypes {
 				allTime := status.AllTimeLatencies[opType]
 				sinceLast := status.SinceLastLatencies[opType]

@@ -9,6 +9,10 @@ import (
 	"time"
 )
 
+var (
+	logger *Logger
+)
+
 // Hook up gocheck into the "go test" runner.
 func Test(t *testing.T) {
 	TestingT(t)
@@ -87,7 +91,7 @@ func (s *TestFileByLineOpsReaderSuite) TestPruneEmptyUpdateObj(c *C) {
 	testJsonString := `{"query": {"$or": [{"_acl": {"$exists": false}}, {"_acl.*.w": true}], "_id": "YDHJwP5hFX"}, "updateobj": {"$set": {"_updated_at": {"$date": 1396457119032}}, "$unset": {}}, "ns": "appdata66.app_0939ec2a-b247-4485-b741-bfe069791305:Prize", "op": "update", "ts": {"$date": 1396457119032}}
 		{"query": {"$or": [{"_acl": {"$exists": false}}, {"_acl.*.w": true}], "_id": "YDHJwP5hFX"}, "updateobj": {"$set": {"_updated_at": {"$date": 1396457119032}}, "$unset": {}}, "ns": "appdata66.app_0939ec2a-b247-4485-b741-bfe069791305:Prize", "op": "update", "ts": {"$date": 1396457119032}}`
 	reader := bytes.NewReader([]byte(testJsonString))
-	err, loader := NewByLineOpsReader(reader)
+	err, loader := NewByLineOpsReader(reader, logger)
 	c.Assert(err, Equals, nil)
 
 	for op := loader.Next(); op != nil; op = loader.Next() {
@@ -103,6 +107,8 @@ func (s *TestFileByLineOpsReaderSuite) TestPruneEmptyUpdateObj(c *C) {
 }
 
 func (s *TestFileByLineOpsReaderSuite) TestFileByLineOpsReader(c *C) {
+	logger, _ = NewLogger("", "")
+	
 	testJsonString :=
 		`{ "ts": {"$date" : 1396456709421}, "ns": "db.coll", "op": "insert", "o": {"logType1": "warning", "message": "m1"} }
         { "ts": {"$date": 1396456709422}, "ns": "db.coll", "op": "insert", "o": {"logType2": "warning", "message": "m2"} }
@@ -110,19 +116,19 @@ func (s *TestFileByLineOpsReaderSuite) TestFileByLineOpsReader(c *C) {
         { "ts": {"$date": 1396456709424}, "ns": "db.coll", "op": "insert", "o": {"logType4": "warning", "message": "m4"} }
         { "ts": {"$date": 1396456709425}, "ns": "db.coll", "op": "insert", "o": {"logType5": "warning", "message": "m5"} }`
 	reader := bytes.NewReader([]byte(testJsonString))
-	err, loader := NewByLineOpsReader(reader)
+	err, loader := NewByLineOpsReader(reader, logger)
 	c.Assert(err, Equals, nil)
 	CheckOpsReader(c, loader)
 	
 	// Reset the reader so that we can test SkipOps
 	reader = bytes.NewReader([]byte(testJsonString))
-	err, loader = NewByLineOpsReader(reader)
+	err, loader = NewByLineOpsReader(reader, logger)
 	c.Assert(err, Equals, nil)
 	CheckSkipOps(c, loader)
 
 	// Reset the reader so that we can test SetStartTime
 	reader = bytes.NewReader([]byte(testJsonString))
-	err, loader = NewByLineOpsReader(reader)
+	err, loader = NewByLineOpsReader(reader, logger)
 	c.Assert(err, Equals, nil)
 	CheckSetStartTime(c, loader)
 }
