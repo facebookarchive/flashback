@@ -100,11 +100,12 @@ func (self *StatsAnalyzer) GetStatus() *ExecutionStatus {
 		opsPerSec = float64(*self.opsExecuted) * float64(time.Second) / float64(duration)
 	}
 	// Calculate ops/sec since last call to GetStatus()
-	duration = time.Now().Sub(self.timeLast)
+	lastDuration := time.Now().Sub(self.timeLast)
 	opsPerSecLast := 0.0
-	if duration != 0 {
-		opsPerSecLast = float64(*self.opsExecuted - self.opsExecutedLast) * float64(time.Second) / float64(duration)
+	if lastDuration != 0 {
+		opsPerSecLast = float64(*self.opsExecuted - self.opsExecutedLast) * float64(time.Second) / float64(lastDuration)
 	}
+	
 	self.opsExecutedLast = *self.opsExecuted
 	self.timeLast = time.Now()
 
@@ -132,7 +133,9 @@ func (self *StatsAnalyzer) GetStatus() *ExecutionStatus {
 		typeOpsSecLast[opType] = 0.0
 		if duration != 0 {
 			typeOpsSec[opType] = float64(counts[opType]) * float64(time.Second) / float64(duration)
-			typeOpsSecLast[opType] = float64(counts[opType] - self.countsLast[opType]) * float64(time.Second) / float64(duration)
+		}
+		if lastDuration != 0 {
+			typeOpsSecLast[opType] = float64(counts[opType] - self.countsLast[opType]) * float64(time.Second) / float64(lastDuration)
 		}
 		self.countsLast[opType] = counts[opType]
 	}
