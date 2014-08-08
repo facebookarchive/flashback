@@ -103,8 +103,10 @@ func (self *StatsAnalyzer) GetStatus() *ExecutionStatus {
 	duration = time.Now().Sub(self.timeLast)
 	opsPerSecLast := 0.0
 	if duration != 0 {
-		opsPerSec = float64(*self.opsExecuted - self.opsExecutedLast) * float64(time.Second) / float64(duration)
+		opsPerSecLast = float64(*self.opsExecuted - self.opsExecutedLast) * float64(time.Second) / float64(duration)
 	}
+	self.opsExecutedLast = *self.opsExecuted
+	self.timeLast = time.Now()
 
 	// Latencies
 	stats := CombineStats(self.statsCollectors...)

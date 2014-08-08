@@ -153,7 +153,6 @@ func makeOpsChan(style string, opsFilename string, logger *Logger) (chan *Op, er
 			if _, err = reader.SetStartTime(startTime); err != nil {
 				return nil, err
 			}
-			return nil, err
 		}
 		if numSkipOps > 0 {
 			if err := reader.SkipOps(numSkipOps); err != nil {
