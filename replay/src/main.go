@@ -246,9 +246,9 @@ func main() {
 			for _, opType := range AllOpTypes {
 				allTime := status.AllTimeLatencies[opType]
 				sinceLast := status.SinceLastLatencies[opType]
-				logger.Infof("  Op type: %s, count: %d, ops/sec: %.2f",
+				logger.Infof("  Op type: %s, count: %d, avg ops/sec: %.2f, last ops/sec: %.2f",
 					opType, status.Counts[opType],
-					status.TypeOpsSec[opType]*float64(workers))
+					status.TypeOpsSec[opType], status.TypeOpsSecLast[opType])
 				template := "   %s: P50: %.2fms, P70: %.2fms, P90: %.2fms, " +
 					"P95 %.2fms, P99 %.2fms, Max %.2fms\n"
 				logger.Infof(template, "Total", toFloat(allTime[P50]),

@@ -61,6 +61,8 @@ func NewStatsCollector() *StatsCollector {
 
 func (s *StatsCollector) StartOp(opType OpType) {
 	s.total++
+	// should track count of opTypes even if they're not sampled
+	s.counts[opType]++
 
 	if s.sampleRate == 0 {
 		return
@@ -81,7 +83,7 @@ func (s *StatsCollector) EndOp() {
 
 	duration := time.Now().Sub(*s.epoch)
 	s.durations[*s.lastOp] += duration
-	s.counts[*s.lastOp]++
+	// s.counts[*s.lastOp]++
 	if s.latencyChan != nil {
 		s.latencyChan <- Latency{*s.lastOp, duration}
 	}
@@ -98,6 +100,9 @@ func (s *StatsCollector) TotalTime(opType OpType) time.Duration {
 }
 
 func (s *StatsCollector) OpsSec(opType OpType) float64 {
+	// TODO: This seems like an unusual way to calculate ops/sec. TotalTime returns the total duration spent doing opType
+	// but really we should be dividing total ops / total wall clock time
+	// this may explain why ops/sec per-op is much higher than total ops/sec
 	nano := s.TotalTime(opType).Nanoseconds()
 	if nano == 0 {
 		return 0

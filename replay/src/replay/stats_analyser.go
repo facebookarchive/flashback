@@ -29,6 +29,7 @@ func NewStatsAnalyzer(
 	latenciesSize int) *StatsAnalyzer {
 	latencies := map[OpType][]int64{}
 	lastEndPos := map[OpType]int{}
+	countsLast := make(map[OpType]int64)
 
 	for _, opType := range AllOpTypes {
 		latencies[opType] = make([]int64, 0, latenciesSize)
@@ -56,6 +57,7 @@ func NewStatsAnalyzer(
 		epoch:           time.Now(),
 		timeLast:	 time.Now(),
 		lastEndPos:      lastEndPos,
+		countsLast:	 countsLast,
 	}
 }
 
@@ -71,6 +73,7 @@ type ExecutionStatus struct {
 	SinceLastLatencies map[OpType][]int64
 	Counts             map[OpType]int64
 	TypeOpsSec         map[OpType]float64
+	TypeOpsSecLast     map[OpType]float64
 }
 
 type StatsAnalyzer struct {
@@ -86,6 +89,7 @@ type StatsAnalyzer struct {
 	// Store the time of the last GetStatus() call
 	timeLast	time.Time
 	lastEndPos      map[OpType]int
+	countsLast	map[OpType]int64
 }
 
 func (self *StatsAnalyzer) GetStatus() *ExecutionStatus {
@@ -108,6 +112,7 @@ func (self *StatsAnalyzer) GetStatus() *ExecutionStatus {
 	sinceLastLatencies := make(map[OpType][]int64)
 	counts := make(map[OpType]int64)
 	typeOpsSec := make(map[OpType]float64)
+	typeOpsSecLast := make(map[OpType]float64)
 
 	for _, opType := range AllOpTypes {
 		// take a snapshot of current status since the latency list keeps
@@ -120,7 +125,14 @@ func (self *StatsAnalyzer) GetStatus() *ExecutionStatus {
 			CalculateLatencyStats(snapshot[lastEndPos:])
 		allTimeLatencies[opType] = CalculateLatencyStats(snapshot)
 		counts[opType] = stats.Count(opType)
-		typeOpsSec[opType] = stats.OpsSec(opType)
+		
+		typeOpsSec[opType] = 0.0
+		typeOpsSecLast[opType] = 0.0
+		if duration != 0 {
+			typeOpsSec[opType] = float64(counts[opType]) * float64(time.Second) / float64(duration)
+			typeOpsSecLast[opType] = float64(counts[opType] - self.countsLast[opType]) * float64(time.Second) / float64(duration)
+		}
+		self.countsLast[opType] = counts[opType]
 	}
 
 	status := ExecutionStatus{
@@ -132,6 +144,7 @@ func (self *StatsAnalyzer) GetStatus() *ExecutionStatus {
 		SinceLastLatencies: sinceLastLatencies,
 		Counts:             counts,
 		TypeOpsSec:         typeOpsSec,
+		TypeOpsSecLast:         typeOpsSecLast,
 	}
 
 	return &status
