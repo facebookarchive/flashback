@@ -155,6 +155,14 @@ func (self *StatsAnalyzer) GetStatus() *ExecutionStatus {
 	return &status
 }
 
+func (self *StatsAnalyzer) LastOpsCount() int64 {
+	return self.opsExecutedLast
+}
+
+func (self *StatsAnalyzer) LastOpTypeCount(opType OpType) int64 {
+	return self.countsLast[opType]
+}
+
 // Sorting facilities
 type int64Slice []int64
 

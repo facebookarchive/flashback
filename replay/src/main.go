@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"sync/atomic"
 	"time"
+	"os"
+	"fmt"
 )
 
 func panicOnError(err error) {
@@ -30,6 +32,8 @@ var (
 	stderr        string
 	stdout        string
 	logger        *Logger
+	statsFilename string
+	statsFile     *os.File
 )
 
 const (
@@ -92,6 +96,10 @@ func init() {
 		"stdout",
 		"",
 		"regular log messages will go to stderr")
+	flag.StringVar(&statsFilename,
+		"statsfilename",
+		"",
+		"[Optional] Provide a path to a file that will store the stats analyzer output at each interval.")
 }
 
 func parseFlags() error {
@@ -192,6 +200,14 @@ func main() {
 	opsChan, err := makeOpsChan(style, opsFilename, logger)
 	panicOnError(err)
 
+	if statsFilename != "" {
+		var err error
+		statsFile, err = os.Create(statsFilename)
+		panicOnError(err)
+		defer statsFile.Close()
+	}
+
+
 	latencyChan := make(chan Latency, workers)
 
 	// Set up workers to do the job
@@ -238,10 +254,18 @@ func main() {
 		toFloat := func(nano int64) float64 {
 			return float64(nano) / float64(1e6)
 		}
+
 		report := func() {
+			var statsLineOutput string
+
 			status := statsAnalyzer.GetStatus()
 			logger.Infof("Executed %d ops, %.2f ops/sec (avg), %.2f ops/sec (last)", opsExecuted,
 				status.OpsPerSec, status.OpsPerSecLast)
+
+			if statsFilename != "" {
+				statsLineOutput = fmt.Sprintf("%d,%d", statsAnalyzer.LastOpsCount(), status.OpsPerSecLast)
+			}
+
 			for _, opType := range AllOpTypes {
 				allTime := status.AllTimeLatencies[opType]
 				sinceLast := status.SinceLastLatencies[opType]
@@ -258,6 +282,19 @@ func main() {
 					toFloat(sinceLast[P70]), toFloat(sinceLast[P90]),
 					toFloat(sinceLast[P95]), toFloat(sinceLast[P99]),
 					toFloat(sinceLast[P100]))
+
+				if statsFilename != "" {
+					statsLineOutput = fmt.Sprintf("%s,%d,%d", statsLineOutput,
+							statsAnalyzer.LastOpTypeCount(opType), status.TypeOpsSec[opType])
+				}
+			}
+
+			// Write stats to disk at each interval for analysis later
+			// Format is:
+			// ops, ops/sec, insert ops, inserts/sec, update ops, update/sec, remove ops, remove/sec,
+			// query ops, query/sec, count ops, count/sec, fam ops, fam/sec
+			if statsFilename != "" {
+				statsFile.WriteString(statsLineOutput + "\n")
 			}
 		}
 		defer report()
