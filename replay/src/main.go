@@ -263,7 +263,8 @@ func main() {
 				status.OpsPerSec, status.OpsPerSecLast)
 
 			if statsFilename != "" {
-				statsLineOutput = fmt.Sprintf("%d,%d", statsAnalyzer.LastOpsCount(), status.OpsPerSecLast)
+				timestamp := time.Now().Format("2006-01-02 15:04:05 -0700")
+				statsLineOutput = fmt.Sprintf("%s,%d,%.2f", timestamp, (status.OpsExecuted - status.OpsExecutedLast), status.OpsPerSecLast)
 			}
 
 			for _, opType := range AllOpTypes {
@@ -284,14 +285,14 @@ func main() {
 					toFloat(sinceLast[P100]))
 
 				if statsFilename != "" {
-					statsLineOutput = fmt.Sprintf("%s,%d,%d", statsLineOutput,
-							statsAnalyzer.LastOpTypeCount(opType), status.TypeOpsSec[opType])
+					statsLineOutput = fmt.Sprintf("%s,%d,%.2f", statsLineOutput,
+							(status.Counts[opType] - status.CountsLast[opType]), status.TypeOpsSecLast[opType])
 				}
 			}
 
 			// Write stats to disk at each interval for analysis later
 			// Format is:
-			// ops, ops/sec, insert ops, inserts/sec, update ops, update/sec, remove ops, remove/sec,
+			// time,  ops, ops/sec, insert ops, inserts/sec, update ops, update/sec, remove ops, remove/sec,
 			// query ops, query/sec, count ops, count/sec, fam ops, fam/sec
 			if statsFilename != "" {
 				statsFile.WriteString(statsLineOutput + "\n")
