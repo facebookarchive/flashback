@@ -48,11 +48,16 @@ def now_in_utc_secs():
     return int(time.time())
 
 
-def create_tailing_cursor(collection, criteria):
+def create_tailing_cursor(collection, criteria, oplog=False):
     """Create a cursor that constantly tail the latest documents from the
        database"""
     tailer = collection.find(
         criteria, slave_okay=True, tailable=True, await_data=False)
+    
+    # Set oplog_replay on the cursor, which allows queries against the oplog to run much faster
+    if oplog:
+        tailer.add_option(8)
+    
     return tailer
 
 
@@ -128,7 +133,7 @@ def get_oplog_tailer(oplog_client, types, target_db, target_colls,
 
     if start_time is not None:
         criteria["ts"] = {"$gte": start_time}
-    return create_tailing_cursor(oplog_collection, criteria)
+    return create_tailing_cursor(oplog_collection, criteria, oplog=True)
 
 
 def get_profiler_tailer(client, target_db, target_colls, start_time):
