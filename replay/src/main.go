@@ -127,14 +127,11 @@ func retryOnSocketFailure(block func() error, session *mgo.Session) error {
 	}
 
 	switch err.(type) {
-	case *mgo.QueryError:
-		return err
-	case *mgo.LastError:
-		return err
+	case *mgo.QueryError, *mgo.LastError: return err
 	}
 
-	if err == mgo.ErrNotFound {
-		return err
+	switch err {
+	case mgo.ErrNotFound, NotSupported: return err
 	}
 
 	// Otherwise it's probably a socket error so we refresh the connection,
@@ -233,7 +230,9 @@ func main() {
 			}
 			err := retryOnSocketFailure(block, session)
 			if verbose == true && err != nil {
-				logger.Error(err)
+				logger.Error(fmt.Sprintf(
+					"error executing op - type:%s,database:%s,collection:%s,error:%s",
+					op.Type,op.Database,op.Collection,err))
 			}
 			atomic.AddInt64(&opsExecuted, 1)
 		}
