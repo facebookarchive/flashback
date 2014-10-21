@@ -3,7 +3,7 @@ package main
 import (
 	"errors"
 	"flag"
-	"labix.org/v2/mgo"
+	"gopkg.in/mgo.v2"
 	. "replay"
 	"runtime"
 	"sync/atomic"
