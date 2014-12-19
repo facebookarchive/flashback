@@ -4,7 +4,7 @@ import logging
 
 DB_CONFIG = {
     # Indicates which database to record.
-    "target_database": "test",
+    "target_database": "foo",
     # Indicates which collections to record. If user wants to capture all the
     # collections' activities, leave this field to be `None` (but we'll always
     # skip collection `system.profile`, even if it has been explicit
@@ -12,7 +12,7 @@ DB_CONFIG = {
     "target_collections": [],
     "oplog_server": {
         "host": "localhost",
-        "port": 27017,
+        "port": 30000,
     },
     # In most cases you will record from the profile DB on the primary
     # If you are also sending queries to secondaries, you may want to specify
@@ -20,14 +20,22 @@ DB_CONFIG = {
     "profiler_servers": [
         {
             "host": "localhost",
-            "port": 27017,
+            "port": 30000,
+        },
+        {
+            "host": "localhost",
+            "port": 30001,
+        },
+        {
+            "host": "localhost",
+            "port": 30002,
         }
     ],
     "oplog_output_file": "./OPLOG_OUTPUT",
     "profiler_output_file": "./PROFILER_OUTPUT",
     "output_file": "./OUTPUT",
     # the length for the recording
-    "duration_secs": 10
+    "duration_secs": 5
 }
 
 APP_CONFIG = {
