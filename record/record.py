@@ -153,7 +153,7 @@ class MongoQueryRecorder(object):
         tailer = utils.get_oplog_tailer(self.oplog_client,
                                         # we are only interested in "insert"
                                         ["i"],
-                                        self.config["target_database"],
+                                        self.config["target_databases"],
                                         self.config["target_collections"],
                                         Timestamp(start_utc_secs, 0))
         oplog_cursor_id = tailer.cursor_id
@@ -170,20 +170,23 @@ class MongoQueryRecorder(object):
         start_datetime = datetime.utcfromtimestamp(start_utc_secs)
         end_datetime = datetime.utcfromtimestamp(end_utc_secs)
         for profiler_name,client in self.profiler_clients.items():
-            tailer = utils.get_profiler_tailer(client,
-                                           self.config["target_database"],
+            # create a profile collection tailer for each db
+            for db in self.config["target_databases"]:
+                tailer = utils.get_profiler_tailer(client,
+                                           db,
                                            self.config["target_collections"],
                                            start_datetime)
-            profiler_cursor_id = tailer.cursor_id
-            workers_info.append({
-                "name": "tailing-profiler %s" % profiler_name,
-                "on_close":
-                lambda: self.profiler_client.kill_cursors([profiler_cursor_id]),
-                "thread": Thread(
-                    target=tail_to_queue,
-                    args=(tailer, profiler_name, doc_queue, state,
-                          end_datetime))
-            })
+                tailer_id = "%s_%s" % (db, profiler_name)
+                profiler_cursor_id = tailer.cursor_id
+                workers_info.append({
+                    "name": "tailing-profiler for %s on %s" % (db, profiler_name),
+                    "on_close":
+                    lambda: self.profiler_client.kill_cursors([profiler_cursor_id]),
+                    "thread": Thread(
+                        target=tail_to_queue,
+                        args=(tailer, tailer_id, doc_queue, state,
+                              end_datetime))
+                })
 
         for worker_info in workers_info:
             utils.LOG.info("Starting thread: %s", worker_info["name"])
@@ -214,9 +217,6 @@ class MongoQueryRecorder(object):
                     thread.join(wait_secs)
                 else:
                     utils.LOG.info("Thread %s exits normally.", name)
-            # TODO: figure out if this is used for anything.
-            # if idx < len(state.tailer_states):
-                #state.tailer_states[idx].is_alive = False
 
     @utils.set_interval(3)
     def _periodically_report_status(self, state):
@@ -226,20 +226,23 @@ class MongoQueryRecorder(object):
         """record the activities in the multithreading way"""
         start_utc_secs = utils.now_in_utc_secs()
         end_utc_secs = utils.now_in_utc_secs() + self.config["duration_secs"]
-        tailer_names = self.profiler_clients.keys()
-        tailer_names.append("oplog")
-        state = MongoQueryRecorder. RecordingState(tailer_names)
         # We'll dump the recorded activities to `files`.
         files = {
             "oplog": open(self.config["oplog_output_file"], "wb")
         }
+        tailer_names = []
         profiler_output_files = []
         # open a file for each profiler client, append client name as suffix
         for client_name in self.profiler_clients:
-            profiler_file_name = "%s-%s" % (self.config["profiler_output_file"],
-                                                client_name)
-            profiler_output_files.append(profiler_file_name)
-            files[client_name]= open(profiler_file_name, "wb")
+            # create a file for each (client,db)
+            for db in self.config["target_databases"]:
+                tailer_name = "%s_%s" % (db, client_name)
+                tailer_names.append(tailer_name)
+                profiler_output_files.append(tailer_name)
+                files[tailer_name]= open(tailer_name, "wb")
+                
+        tailer_names.append("oplog")
+        state = MongoQueryRecorder. RecordingState(tailer_names)
         
         # Create a series working threads to handle to track/dump mongodb
         # activities. On return, these threads have already started.
@@ -267,7 +270,6 @@ class MongoQueryRecorder(object):
             oplog_output_file=self.config["oplog_output_file"],
             profiler_output_files=profiler_output_files,
             output_file=self.config["output_file"])
-
 
 def main():
     """Recording the inbound traffic for a database."""

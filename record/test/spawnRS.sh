@@ -18,9 +18,13 @@ sleep 5
 # initiate a replicaset
 echo 'rs.initiate({"_id": "testenv", "members": [ { "_id": 0, "host": "localhost:30000", "priority": 3 }, {"_id":1, "host": "localhost:30001", "priority": 2}, {"_id":2, "host":"localhost:30002", "priority": 2 }]})' | mongo localhost:30000
 
-sleep 5
+# sleep long enough to let RS initiate complete
+sleep 30
 
 # enable profiling on all servers
-echo 'db.getSiblingDB("foo").setProfilingLevel(2)' | mongo localhost:30000
-echo 'db.getSiblingDB("foo").setProfilingLevel(2)' | mongo localhost:30001
-echo 'db.getSiblingDB("foo").setProfilingLevel(2)' | mongo localhost:30002
+echo 'db.setProfilingLevel(2)' | mongo localhost:30000/foo
+echo 'rs.slaveOk(); db.setProfilingLevel(2)' | mongo localhost:30001/foo
+echo 'rs.slaveOk(); db.setProfilingLevel(2)' | mongo localhost:30002/foo
+echo 'db.setProfilingLevel(2)' | mongo localhost:30000/bar
+echo 'rs.slaveOk(); db.setProfilingLevel(2)' | mongo localhost:30001/bar
+echo 'rs.slaveOk(); db.setProfilingLevel(2)' | mongo localhost:30002/bar
