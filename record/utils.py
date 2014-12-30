@@ -4,6 +4,7 @@ import config
 import cPickle
 import time
 import pymongo
+import string
 import threading
 import constants
 
@@ -97,7 +98,7 @@ def set_interval(interval, start_immediately=True, exec_on_exit=True):
     return decorator
 
 
-def make_ns_selector(database, target_collections):
+def make_ns_selector(databases, target_collections):
     system_collections = \
         set([constants.PROFILER_COLLECTION, constants.INDEX_COLLECTION])
 
@@ -107,16 +108,18 @@ def make_ns_selector(database, target_collections):
 
     if target_collections is not None and len(target_collections) > 0:
         return {"$in": ["{0}.{1}".format(database, coll)
-                for coll in target_collections]}
+                for coll in target_collections
+                for database in databases]}
     else:
         return {
-            "$regex": r"^{}\.".format(database),
+            "$regex": r"^({})\.".format(string.join(databases, '|')),
             "$nin": ["{0}.{1}".format(database, coll)
-                     for coll in system_collections]
+                        for coll in system_collections
+                        for database in databases]
         }
 
 
-def get_oplog_tailer(oplog_client, types, target_db, target_colls,
+def get_oplog_tailer(oplog_client, types, target_dbs, target_colls,
                      start_time=None):
     """Start recording the oplog entries starting from now.
     We only care about "insert" operations since all other queries will
@@ -128,7 +131,7 @@ def get_oplog_tailer(oplog_client, types, target_db, target_colls,
         oplog_client[constants.LOCAL_DB][constants.OPLOG_COLLECTION]
     criteria = {
         "op": {"$in": types},
-        "ns": make_ns_selector(target_db, target_colls)
+        "ns": make_ns_selector(target_dbs, target_colls)
     }
 
     if start_time is not None:
@@ -140,7 +143,7 @@ def get_profiler_tailer(client, target_db, target_colls, start_time):
     """Start recording the profiler entries"""
     profiler_collection = client[target_db][constants.PROFILER_COLLECTION]
     criteria = {
-        "ns": make_ns_selector(target_db, target_colls),
+        "ns": make_ns_selector([target_db], target_colls),
         "ts": {"$gte": start_time}
     }
 
