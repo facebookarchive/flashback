@@ -28,7 +28,7 @@ def dump_op(output, op):
     output.write("\n")
 
 
-def merge_to_final_output(oplog_output_file, profiler_output_file, output_file):
+def merge_to_final_output(oplog_output_file, profiler_output_files, output_file):
     """
     * Why merge files:
         we need to merge the docs from two sources into one.
@@ -39,26 +39,49 @@ def merge_to_final_output(oplog_output_file, profiler_output_file, output_file):
         on-time merge since you cannot determine if some "old" entries will come
         later."""
     oplog = open(oplog_output_file, "rb")
-    profiler = open(profiler_output_file, "rb")
+    
+    # create a map of profiler file names to files
+    profiler_files = {}
+    for profiler_file in profiler_output_files:
+        profiler_files[profiler_file] = open(profiler_file, "rb")
+        
     output = open(output_file, "wb")
     logger = utils.LOG
 
     logger.info("Starts completing the insert options")
     oplog_doc = utils.unpickle(oplog)
-    profiler_doc = utils.unpickle(profiler)
+    # create a map of (profiler file names, doc ts) to doc
+    profiler_docs = {}
+    for file_name in profiler_files:
+        doc = utils.unpickle(profiler_files[file_name])
+        # associate doc with a tuple representing the ts and source filename
+        # this makes it easy to fetch the earliest doc in the group on each
+        # iteration
+        if doc:
+            profiler_docs[(doc["ts"], file_name)] = doc
     inserts = 0
     noninserts = 0
     severe_inconsistencies = 0
     mild_inconsistencies = 0
 
-    while oplog_doc and profiler_doc:
+    # read docs until either we exhaust the oplog or all ops in the profile logs
+    while oplog_doc and len(profiler_docs) > 0:
         if (noninserts + inserts) % 2500 == 0:
             logger.info("processed %d items", noninserts + inserts)
+            
+        # get the earliest profile doc out of all profiler_docs
+        key = min(profiler_docs.keys())
+        profiler_doc = profiler_docs[key]
+        # remove the doc and fetch a new one
+        del(profiler_docs[key])
+        # the first field in the key is the file name
+        doc = utils.unpickle(profiler_files[key[1]])
+        if doc:
+            profiler_docs[(doc["ts"], key[1])] = doc
 
         if profiler_doc["op"] != "insert":
             dump_op(output, profiler_doc)
             noninserts += 1
-            profiler_doc = utils.unpickle(profiler)
         else:
             # Replace the the profiler's insert operation doc with oplog's,
             # but keeping the canonical form of "ts".
@@ -87,19 +110,31 @@ def merge_to_final_output(oplog_output_file, profiler_output_file, output_file):
             dump_op(output, oplog_doc)
             inserts += 1
             oplog_doc = utils.unpickle(oplog)
-            profiler_doc = utils.unpickle(profiler)
 
-    while profiler_doc and profiler_doc["op"] != "insert":
+    # finish up any remaining non-insert ops
+    while len(profiler_docs) > 0:
+        # get the earliest profile doc out of all profiler_docs
+        key = min(profiler_docs.keys())
+        profiler_doc = profiler_docs[key]
+        # remove the doc and fetch a new one
+        del(profiler_docs[key])
+        doc = utils.unpickle(profiler_files[key[1]])
+        if doc:
+            profiler_docs[(doc["ts"], key[1])] = doc
+            
+        if profiler_doc["op"] == "insert":
+            break
         dump_op(output, profiler_doc)
         noninserts += 1
-        profiler_doc = utils.unpickle(profiler)
 
     logger.info("Finished completing the insert options, %d inserts and"
                 " %d noninserts\n"
                 "  severe ts incosistencies: %d\n"
                 "  mild ts incosistencies: %d\n", inserts, noninserts,
                 severe_inconsistencies, mild_inconsistencies)
-    for f in [oplog, profiler, output]:
+    for f in [oplog, output]:
+        f.close()
+    for f in profiler_files.values():
         f.close()
 
     return True
