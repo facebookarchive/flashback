@@ -1,38 +1,38 @@
 # What is Flashback
 
-How can you know how good your MongoDB (or other databases with similar interface) performance is? Easy, you can benchmark it. A general way to solve this problem is to use the benchmark tool to generate the query with random contents under certain random distribution.
+How can you measure how good your MongoDB (or other databases with similar interface) performance is? Easy, you can benchmark it. A general way to solve this problem is to use a benchmark tool to generate queries with random contents under certain random distribution.
 
-But sometimes you don't satisfy the randomly generated queries since you're not confident if how much these queries resemble your real workload.
+But sometimes you are not satisfied with the randomly generated queries, since you're not confident in how much these queries resemble your real workload.
 
-The difficulty compounds when one MongoDB instance may host totally different types of databases that have their unique and complicated access patterns.
+The difficulty compounds when one MongoDB instance may host completely different types of databases that each have their own unique and complicated access patterns.
 
-That is the reason we come up with `Flashback`, a MongoDB benchmark framework that allows us to benchmark with "real" queries. it comprises of a set of scripts that fall into the 2 categories:
+That is the reason we came up with `Flashback`, a MongoDB benchmark framework that allows us to benchmark with "real" queries. It is comprised of a set of scripts that fall into the 2 categories:
 
-1. records the operations(_ops_) that happens during a stretch of time;
+1. records the operations(_ops_) that occur during a stretch of time;
 2. replays the recorded ops.
 
-The two parts do not necessarily couple with each other and can be used independently for different purposes.
+The two parts are not tied to each other and can be used independently for different purposes.
 
 # How it works
 
 ## Record
 
-How can you know which ops are performed by MongoDB? There are a lot of ways to do this. But in Flashback, we record the ops by enabling MongoDB's [profiling](http://docs.mongodb.org/manual/reference/command/profile/).
+How do you know which ops are performed by MongoDB? There are a lot of ways to do this. But in Flashback, we record the ops by enabling MongoDB's [profiling](http://docs.mongodb.org/manual/reference/command/profile/).
 
-By setting the profile level to _2_ (profile all ops), we'll be able to fetch the ops information that is detailed enough for future replay -- except for _insert_ ops.
+By setting the profile level to _2_ (profile all ops), we'll be able to fetch the ops information detailed enough for future replay -- except for _insert_ ops.
 
-MongoDB intentionally avoids putting insertion details in profiling results because they don't want to have the insertion being written several times. Luckily, if a MongoDB instance is working in a "replica set", then we can complete the missing information through _oplog_.
+MongoDB intentionally avoids putting insertion details in profiling results because they don't want to have the insertion being written several times. Luckily, if a MongoDB instance is working in a "replica set", then we can complete the missing information by reading the _oplog_.
 
 Thus, we record the ops with the following steps:
 
-1. Script starts two threads to pull the profiling results and oplog entries for collections that we are interested in. 2 threads are working independently.
+1. The script starts two threads to pull the profiling results and oplog entries for collections that we are interested in. The 2 threads work independently.
 2. After fetching the entries, we'll merge the results from these two sources and have a full pictures of all the operations.
 
-NOTE: If the oplog size is huge, fetching the first entry from oplog may take a long time (several hours) because oplog is unindexed. After that it will catch up with present time quickly.
+NOTE: If the oplog size is huge, fetching the first entry from oplog may take a long time (several hours) because the oplog is unindexed. After that it will catch up to present time quickly.
 
 ## Replay
 
-With the ops being recorded, we also have replayer to replay them in different ways:
+With the ops being recorded, we also have a replayer to replay them in different ways:
 
 * Replay ops with "best effort". The replayer diligently sends these ops to databases as fast as possible. This style can help us to measure the limits of databases. Please note to reduce the overhead for loading ops, we'll preload the ops to the memory and replay them as fast as possible.
 * Reply ops in accordance to their original timestamps, which allows us to imitate regular traffic.
@@ -53,7 +53,7 @@ The replay module is written in Go because Python doesn't do a good job in concu
 
 * If you are a first time user, please run `cp config.py.example config.py`.
 * In `config.py`, modify it based on your need. Here are some notes:
-    * We intentionally separate the servers for oplog pulling and profiling results pulling. As a good practice, it's better to pull oplog from secondaries. However profiling results must be pulled from the primary server.
+    * We intentionally separate the servers for oplog retrieval and profiling results retrieval. As a good practice, it's better to pull oplog from secondaries. However profiling results must be pulled from the primary server.
     * `duration_secs` indicates the length for the recording.
 
 ### Start Recording
