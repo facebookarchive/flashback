@@ -3,7 +3,7 @@ r""" Track the MongoDB activities by tailing oplog and profiler output"""
 
 from bson.timestamp import Timestamp
 from datetime import datetime
-from pymongo import MongoClient
+from pymongo import MongoClient, uri_parser
 from threading import Thread
 import config
 import cPickle
@@ -84,14 +84,16 @@ class MongoQueryRecorder(object):
         oplog_server = self.config["oplog_server"]
         profiler_servers = self.config["profiler_servers"]
 
-        self.oplog_client = MongoClient(oplog_server["host"],
-                                        oplog_server["port"])
+        mongodb_uri = oplog_server["mongodb_uri"]
+        self.oplog_client = MongoClient(mongodb_uri)
         # create a mongo client for each profiler server
         self.profiler_clients = {}
         for index, server in enumerate(profiler_servers):
-            server_string = "%s:%s" % (server['host'], server['port'])
-            self.profiler_clients[server_string] = MongoClient(server['host'],
-                                                               server['port'],
+            mongodb_uri = server['mongodb_uri']
+            nodelist = uri_parser.parse_uri(mongodb_uri)["nodelist"]
+            server_string = "%s:%s" % (nodelist[0][0], nodelist[0][1])
+
+            self.profiler_clients[server_string] = MongoClient(mongodb_uri,
                                                                slaveOk=True)
             utils.LOG.info("profiling server %d: %s", index, str(server))
             
