@@ -38,8 +38,8 @@ func NewLogger(stdout string, stderr string) (logger *Logger, err error) {
 	}
 
 	logger = &Logger{
-		stderr:  log.New(stderrWriter, "INFO ", log.LstdFlags|log.Lshortfile),
-		stdout:  log.New(stdoutWriter, "ERROR ", log.LstdFlags|log.Lshortfile),
+		stderr:  log.New(stderrWriter, "ERROR ", log.LstdFlags|log.Lshortfile),
+		stdout:  log.New(stdoutWriter, "INFO ", log.LstdFlags|log.Lshortfile),
 		toClose: toClose,
 	}
 	return
