@@ -74,8 +74,8 @@ def main():
     output = open(sys.argv[2], "w")
 
     # Get the tailer for oplog
-    oplog_server = db_config["oplog_server"]
-    oplog_client = MongoClient(oplog_server["host"], oplog_server["port"])
+    mongodb_uri = db_config["oplog_server"]["mongodb_uri"]
+    oplog_client = MongoClient(mongodb_uri)
     tailer = utils.get_oplog_tailer(oplog_client,
                                     ["i", "u"],
                                     db_config["target_database"],
