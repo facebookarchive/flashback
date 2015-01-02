@@ -21,20 +21,18 @@ How do you know which ops are performed by MongoDB? There are a lot of ways to d
 
 By setting the profile level to _2_ (profile all ops), we'll be able to fetch the ops information detailed enough for future replay -- except for _insert_ ops.
 
-MongoDB intentionally avoids putting insertion details in profiling results because they don't want to have the insertion being written several times. Luckily, if a MongoDB instance is working in a "replica set", then we can complete the missing information by reading the _oplog_.
+MongoDB does not log insertion details in the profile DB. However, if a MongoDB instance is working in a "replica set", we can capture insert information by reading the _oplog_.
 
 Thus, we record the ops with the following steps:
 
-1. The script starts two threads to pull the profiling results and oplog entries for collections that we are interested in. The 2 threads work independently.
-2. After fetching the entries, we'll merge the results from these two sources and have a full pictures of all the operations.
-
-NOTE: If the oplog size is huge, fetching the first entry from oplog may take a long time (several hours) because the oplog is unindexed. After that it will catch up to present time quickly.
+1. The script starts multiple threads to pull the profiling results and oplog entries for collections and databases that we are interested in. Each thread works independently.
+2. After fetching the entries, we'll merge the results from all sources to get a full picture of all operations.
 
 ## Replay
 
 With the ops being recorded, we also have a replayer to replay them in different ways:
 
-* Replay ops with "best effort". The replayer diligently sends these ops to databases as fast as possible. This style can help us to measure the limits of databases. Please note to reduce the overhead for loading ops, we'll preload the ops to the memory and replay them as fast as possible.
+* Replay ops with "best effort". The replayer diligently sends these ops to databases as fast as possible. This style can help us to measure the limits of databases. Please note to reduce the overhead for loading ops, we'll preload the ops to the memory and replay them as fast as possible. This potentially limits the number of ops played back per session to the available memory on the Replay host.
 * Reply ops in accordance to their original timestamps, which allows us to imitate regular traffic.
 
 The replay module is written in Go because Python doesn't do a good job in concurrent CPU intensive tasks.
@@ -65,6 +63,8 @@ After configuration, please simply run `python record.py`.
 ### Prerequisites
 
 Install `mgo` as it is the mongodb go driver.
+
+    go get gopkg.in/mgo.v2
 
 ### Command
 Required options:
