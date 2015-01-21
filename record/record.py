@@ -81,11 +81,18 @@ class MongoQueryRecorder(object):
             self.config["target_collections"] = set(
                 [coll.strip() for coll in self.config["target_collections"]])
 
-        oplog_server = self.config["oplog_server"]
+        oplog_servers = self.config["oplog_servers"]
         profiler_servers = self.config["profiler_servers"]
 
-        mongodb_uri = oplog_server["mongodb_uri"]
-        self.oplog_client = MongoClient(mongodb_uri)
+        self.oplog_clients = {}
+        for index, server in enumerate(oplog_servers):
+            mongodb_uri = server['mongodb_uri']
+            nodelist = uri_parser.parse_uri(mongodb_uri)["nodelist"]
+            server_string = "%s:%s" % (nodelist[0][0], nodelist[0][1])
+
+            self.oplog_clients[server_string] = self.connect_mongo(server)
+            utils.LOG.info("oplog server %d: %s", index, str(server))
+
         # create a mongo client for each profiler server
         self.profiler_clients = {}
         for index, server in enumerate(profiler_servers):
@@ -93,11 +100,8 @@ class MongoQueryRecorder(object):
             nodelist = uri_parser.parse_uri(mongodb_uri)["nodelist"]
             server_string = "%s:%s" % (nodelist[0][0], nodelist[0][1])
 
-            self.profiler_clients[server_string] = MongoClient(mongodb_uri,
-                                                               slaveOk=True)
+            self.profiler_clients[server_string] = self.connect_mongo(server)
             utils.LOG.info("profiling server %d: %s", index, str(server))
-            
-        utils.LOG.info("oplog server: %s", str(oplog_server))
 
     @staticmethod
     def _process_doc_queue(doc_queue, files, state):
@@ -132,6 +136,19 @@ class MongoQueryRecorder(object):
 
         utils.LOG.info("".join(msgs))
 
+    def connect_mongo(self, server_config):
+        client = MongoClient(server_config['mongodb_uri'], slaveOk=True)
+        if server_config['auth_db'] is not None \
+           and server_config['user'] is not None \
+           and server_config['password'] is not None:
+                try:
+                    client[server_config['auth_db']].authenticate(
+                        server_config['user'], server_config['password'])
+                except Exception, e:
+                    utils.log.error("Unable to authenticated to %s: %s " %
+                                    (server_config['mongodb_uri'], e))
+        return client
+
     def force_quit_all(self):
         """Gracefully quite all recording activities"""
         self.force_quit = True
@@ -152,32 +169,33 @@ class MongoQueryRecorder(object):
                 target=MongoQueryRecorder._process_doc_queue,
                 args=(doc_queue, files, state))
         })
-        tailer = utils.get_oplog_tailer(self.oplog_client,
-                                        # we are only interested in "insert"
-                                        ["i"],
-                                        self.config["target_databases"],
-                                        self.config["target_collections"],
-                                        Timestamp(start_utc_secs, 0))
-        oplog_cursor_id = tailer.cursor_id
-        workers_info.append({
-            "name": "tailing-oplogs",
-            "on_close":
-            lambda: self.oplog_client.kill_cursors([oplog_cursor_id]),
-            "thread": Thread(
-                target=tail_to_queue,
-                args=(tailer, "oplog", doc_queue, state,
-                      Timestamp(end_utc_secs, 0)))
-        })
+        for profiler_name, client in self.oplog_clients.items():
+            # create a profile collection tailer for each db
+            tailer = utils.get_oplog_tailer(client, ["i"],
+                                            self.config["target_databases"],
+                                            self.config["target_collections"]
+                                            )
+            oplog_cursor_id = tailer.cursor_id
+            workers_info.append({
+                "name": "tailing-oplogs on %s" % (profiler_name),
+                "on_close":
+                lambda: self.oplog_client.kill_cursors([oplog_cursor_id]),
+                "thread": Thread(
+                    target=tail_to_queue,
+                    args=(tailer, "oplog", doc_queue, state,
+                          Timestamp(end_utc_secs, 0)))
+            })
 
         start_datetime = datetime.utcfromtimestamp(start_utc_secs)
         end_datetime = datetime.utcfromtimestamp(end_utc_secs)
-        for profiler_name,client in self.profiler_clients.items():
+        for profiler_name, client in self.profiler_clients.items():
             # create a profile collection tailer for each db
             for db in self.config["target_databases"]:
                 tailer = utils.get_profiler_tailer(client,
-                                           db,
-                                           self.config["target_collections"],
-                                           start_datetime)
+                                                   db,
+                                                   self.config["target_collections"],
+                                                   start_datetime
+                                                   )
                 tailer_id = "%s_%s" % (db, profiler_name)
                 profiler_cursor_id = tailer.cursor_id
                 workers_info.append({
