@@ -4,6 +4,7 @@ r""" Track the MongoDB activities by tailing oplog and profiler output"""
 from bson.timestamp import Timestamp
 from datetime import datetime
 from pymongo import MongoClient, uri_parser
+import pymongo
 from threading import Thread
 import config
 import cPickle
@@ -12,6 +13,7 @@ import time
 import utils
 import signal
 import merge
+import sys
 
 
 def tail_to_queue(tailer, identifier, doc_queue, state, end_time,
@@ -42,6 +44,12 @@ def tail_to_queue(tailer, identifier, doc_queue, state, end_time,
                 break
             tailer_state.last_get_none_ts = datetime.now()
             time.sleep(check_duration_secs)
+        except pymongo.errors.OperationFailure:
+            utils.LOG.error(
+                "source %s: We appear to not have the %s collection create or is non-capped!",
+                (identifier, tailer.collection))
+            sys.exit(1)
+
     tailer_state.alive = False
     utils.LOG.info("source %s: Tailing to queue completed!", identifier)
 
@@ -68,7 +76,6 @@ class MongoQueryRecorder(object):
 
         def __init__(self, tailer_names):
             self.timeout = False
-            
             self.tailer_states = {}
             for name in tailer_names:
                 self.tailer_states[name] = self.make_tailer_state()
@@ -259,11 +266,9 @@ class MongoQueryRecorder(object):
                 tailer_name = "%s_%s" % (db, client_name)
                 tailer_names.append(tailer_name)
                 profiler_output_files.append(tailer_name)
-                files[tailer_name]= open(tailer_name, "wb")
-                
+                files[tailer_name] = open(tailer_name, "wb")
         tailer_names.append("oplog")
         state = MongoQueryRecorder. RecordingState(tailer_names)
-        
         # Create a series working threads to handle to track/dump mongodb
         # activities. On return, these threads have already started.
         workers_info = self._generate_workers(files, state, start_utc_secs,
@@ -290,6 +295,7 @@ class MongoQueryRecorder(object):
             oplog_output_file=self.config["oplog_output_file"],
             profiler_output_files=profiler_output_files,
             output_file=self.config["output_file"])
+
 
 def main():
     """Recording the inbound traffic for a database."""
