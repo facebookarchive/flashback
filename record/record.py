@@ -27,6 +27,7 @@ def tail_to_queue(tailer, identifier, doc_queue, state, end_time,
         it will sleep for a period of time and then try again.
     """
     tailer_state = state.tailer_states[identifier]
+    preformed_loops = 0
     while tailer.alive and all(s.alive for s in state.tailer_states.values()):
         try:
             doc = tailer.next()
@@ -44,11 +45,12 @@ def tail_to_queue(tailer, identifier, doc_queue, state, end_time,
                 break
             tailer_state.last_get_none_ts = datetime.now()
             time.sleep(check_duration_secs)
-        except pymongo.errors.OperationFailure:
-            utils.LOG.error(
-                "source %s: We appear to not have the %s collection create or is non-capped!",
-                (identifier, tailer.collection))
-            sys.exit(1)
+        except pymongo.errors.OperationFailure, e:
+	    if preformed_loops == 0:
+	        utils.LOG.error(
+                    "source %s: We appear to not have the %s collection create or is non-capped! %s",
+                    identifier, tailer.collection,e)
+        preformed_loops += 1
 
     tailer_state.alive = False
     utils.LOG.info("source %s: Tailing to queue completed!", identifier)
@@ -180,7 +182,8 @@ class MongoQueryRecorder(object):
             # create a profile collection tailer for each db
             tailer = utils.get_oplog_tailer(client, ["i"],
                                             self.config["target_databases"],
-                                            self.config["target_collections"]
+                                            self.config["target_collections"],
+					    None
                                             )
             oplog_cursor_id = tailer.cursor_id
             workers_info.append({
