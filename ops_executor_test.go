@@ -20,10 +20,12 @@ var _ = Suite(&TestExecutorSuite{})
 func (s *TestExecutorSuite) TestExecution(c *C) {
 	test_db := "test_db_for_executor"
 	test_collection := "c1"
+
 	session, err := mgo.Dial("localhost")
-	defer session.Close()
-	c.Assert(session, NotNil)
 	c.Assert(err, IsNil)
+	c.Assert(session, NotNil)
+	defer session.Close()
+
 	err = session.DB(test_db).DropDatabase()
 	c.Assert(err, IsNil)
 
