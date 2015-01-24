@@ -3,14 +3,14 @@ package main
 import (
 	"errors"
 	"flag"
-	"gopkg.in/mgo.v2"
-	. "replay"
+	"fmt"
+	"math"
+	"os"
 	"runtime"
 	"sync/atomic"
 	"time"
-	"os"
-	"fmt"
-	"math"
+
+	"gopkg.in/mgo.v2"
 )
 
 func panicOnError(err error) {
@@ -131,11 +131,13 @@ func retryOnSocketFailure(block func() error, session *mgo.Session) error {
 	}
 
 	switch err.(type) {
-	case *mgo.QueryError, *mgo.LastError: return err
+	case *mgo.QueryError, *mgo.LastError:
+		return err
 	}
 
 	switch err {
-	case mgo.ErrNotFound, NotSupported: return err
+	case mgo.ErrNotFound, NotSupported:
+		return err
 	}
 
 	// Otherwise it's probably a socket error so we refresh the connection,
@@ -208,7 +210,6 @@ func main() {
 		defer statsFile.Close()
 	}
 
-
 	latencyChan := make(chan Latency, workers)
 
 	// Set up workers to do the job
@@ -236,7 +237,7 @@ func main() {
 			if verbose == true && err != nil {
 				logger.Error(fmt.Sprintf(
 					"error executing op - type:%s,database:%s,collection:%s,error:%s",
-					op.Type,op.Database,op.Collection,err))
+					op.Type, op.Database, op.Collection, err))
 			}
 			atomic.AddInt64(&opsExecuted, 1)
 		}
@@ -289,7 +290,7 @@ func main() {
 
 				if statsFilename != "" {
 					statsLineOutput = fmt.Sprintf("%s,%d,%.2f", statsLineOutput,
-							(status.Counts[opType] - status.CountsLast[opType]), status.TypeOpsSecLast[opType])
+						(status.Counts[opType] - status.CountsLast[opType]), status.TypeOpsSecLast[opType])
 				}
 			}
 
