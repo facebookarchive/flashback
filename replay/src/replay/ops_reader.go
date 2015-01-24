@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"gopkg.in/mgo.v2/bson"
+	"github.com/mongodb/mongo-tools/common/bsonutil" // requires go 1.4
 	"os"
 	"strings"
 	"time"
@@ -173,68 +173,15 @@ func parseJson(jsonText string) (Document, error) {
 	if err != nil {
 		return rawObj, err
 	}
-	normalizeObj(rawObj)
+	err = normalizeObj(rawObj)
 	return rawObj, err
 }
 
-// Detect if a document object is the "metadata". Right now we deal with two
-// types of metadata:
-// 1. document like { "$time": <timestamp> } will be converted to time.Time
-// 	  object.
-// 2. document like { "oid": <hex-string> } will be converted to ObjectId.
-// @returns a boolean indicate if anything got converted; if yes, the second
-// 			return value will be the converted object.
-func parseMetadata(obj Document) (bool, interface{}) {
-	// All the metadata are represented by a map object with single key/value
-	// pair.
-	if len(obj) != 1 {
-		return false, nil
-	}
-
-	if obj["$date"] != nil {
-		// all integers are parsed as float.
-		date := (int64)(obj["$date"].(float64))
-		// Represented as unix time, The last 3 digits are encodes "ms" while
-		// the rest digits indicate "seconds".
-		return true, time.Unix(
-			date/1000, /* sec */
-			date%1000*1000000 /* nano sec */)
-	}
-
-	if obj["$oid"] != nil {
-		return true, bson.ObjectIdHex(obj["$oid"].(string))
-	}
-
-	return false, nil
-}
-
-// Recursively Replace some "metadata" from its string representation to the
-// format that mgo recognizes.
-func normalizeObj(rawObj Document) {
-	for key, val := range rawObj {
-		switch typedVal := val.(type) {
-		default:
-			continue
-		case map[string]interface{}:
-			updated, updatedObj := parseMetadata(typedVal)
-			if !updated {
-				// if not updated, recursively scanning the sub-doc for this
-				// value.
-				normalizeObj(typedVal)
-			} else {
-				rawObj[key] = updatedObj
-			}
-		case []interface{}:
-			for i := range typedVal {
-				switch item := typedVal[i].(type) {
-				case map[string]interface{}:
-					normalizeObj(item)
-				default:
-					continue
-				}
-			} // list iteration
-		} // switch
-	} // map iteration
+// Convert mongo extended json types from their strict JSON representation
+// to appropriate bson types
+// http://docs.mongodb.org/manual/reference/mongodb-extended-json/
+func normalizeObj(rawObj Document) error {
+	return bsonutil.ConvertJSONDocumentToBSON(rawObj)
 }
 
 // Some operations are recorded with empty values for $set, $unset, and possibly $inc

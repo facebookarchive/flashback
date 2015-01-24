@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	. "gopkg.in/check.v1"
-	"labix.org/v2/mgo/bson"
+	"gopkg.in/mgo.v2/bson"
 	"testing"
 	"time"
 )
@@ -163,6 +163,23 @@ func (s *TestFileByLineOpsReaderSuite) TestComplexnormalizeObj(c *C) {
 		"doc5": map[string]interface{}{
 			"$oid": "533c3d03c23fffd217678ee7",
 		},
+		"doc6": map[string]interface{}{
+			"$binary": "dmFsaWRiYXNlNjQ=",
+			"$type": "00",
+		},
+		"doc7": map[string]interface{}{
+			"$regex": "abc",
+			"$options": "gims",
+		},
+		"doc8": map[string]interface{}{
+			"$minKey": "1",
+		},
+		"doc9": map[string]interface{}{
+			"$maxKey": "1",
+		},
+		"doc10": map[string]interface{}{
+			"$undefined": "true",
+		},
 	}
 	normalizeObj(complicatedItem)
 	// check the ts
@@ -181,4 +198,25 @@ func (s *TestFileByLineOpsReaderSuite) TestComplexnormalizeObj(c *C) {
 	// check the id
 	doc5 := complicatedItem["doc5"].(bson.ObjectId)
 	c.Assert(doc5, Equals, bson.ObjectIdHex("533c3d03c23fffd217678ee7"))
+
+	// check that binary types are converted to bson.Binary
+	fmt.Println(complicatedItem["doc6"])
+	doc6 := complicatedItem["doc6"].(bson.Binary)
+	c.Assert(doc6.Kind, Equals, byte(00))
+	c.Assert(doc6.Data, DeepEquals, []byte("validbase64"))
+
+	// check that regex types are converted to bson.RegEx
+	doc7 := complicatedItem["doc7"].(bson.RegEx)
+	c.Assert(doc7.Pattern, Equals, "abc")
+	c.Assert(doc7.Options, Equals, "gims")
+
+	// check minKey/maxKey
+	doc8 := complicatedItem["doc8"]
+	c.Assert(doc8, DeepEquals, bson.MinKey)
+	// check minKey/maxKey
+	doc9 := complicatedItem["doc9"]
+	c.Assert(doc9, DeepEquals, bson.MaxKey)
+	// check undefined
+	doc10 := complicatedItem["doc10"]
+	c.Assert(doc10, DeepEquals, bson.Undefined)
 }

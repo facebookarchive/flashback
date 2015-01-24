@@ -3,7 +3,7 @@ package replay
 import (
 	"fmt"
 	. "gopkg.in/check.v1"
-	"labix.org/v2/mgo"
+	"gopkg.in/mgo.v2"
 	"testing"
 )
 

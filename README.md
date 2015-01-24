@@ -62,9 +62,16 @@ After configuration, please simply run `python record.py`.
 
 ### Prerequisites
 
+You should be using go version 1.4 or later.
+
 Install `mgo` as it is the mongodb go driver.
 
     go get gopkg.in/mgo.v2
+    
+Other dependencies:
+
+    go get github.com/mongodb/mongo-tools/common/bsonutil
+    go get gopkg.in/mgo.v2/bson
 
 ### Command
 Required options:
