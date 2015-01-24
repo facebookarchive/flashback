@@ -2,9 +2,10 @@ package replay
 
 import (
 	"fmt"
+	"testing"
+
 	. "gopkg.in/check.v1"
 	"gopkg.in/mgo.v2"
-	"testing"
 )
 
 // Hook up gocheck into the "go test" runner.

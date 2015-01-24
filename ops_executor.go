@@ -2,6 +2,7 @@ package replay
 
 import (
 	"errors"
+
 	"gopkg.in/mgo.v2"
 )
 
