@@ -18,7 +18,7 @@ const (
 	Query         OpType = "query"
 	Command       OpType = "command"
 	Count         OpType = "command.count"
-	FindAndModify OpType = "command.findandmodify"
+	FindAndModify OpType = "command.findandModify"
 )
 
 // AllOpTypes specifies all supported op types

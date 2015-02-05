@@ -97,7 +97,7 @@ func canonicalizeOp(op *Op) *Op {
 
 	cmd := op.Content["command"].(map[string]interface{})
 
-	for _, name := range []string{"findandmodify", "count"} {
+	for _, name := range []string{"findandModify", "count"} {
 		collName, exist := cmd[name]
 		if !exist {
 			continue

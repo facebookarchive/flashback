@@ -188,15 +188,15 @@ func normalizeObj(rawObj Document) error {
 // When these are replayed against a mongo instance, they generate an error and do not execute
 // This method will detect and remove these empty blocks before the query is executed
 // A couple of examples are below
-// {"ns": "appdata68.$cmd", "command": {"query": {"$or": [{"_acl": {"$exists": false}}, {"_acl.*.w": true}], "_id": "5Npn4XbXVF"}, "findandmodify": "app_0ecb3ea0-a35a-4fa6-b1a8-2bf66ae160ff:_Installation", "update": {"$set": {"_updated_at": {"$date": 1396457187276}}, "$unset": {}, "$addToSet": {"channels": {"$each": ["", "v5420"]}}}, "new": true}, "ts": {"$date": 1396457187283}, "op": "command"}
+// {"ns": "appdata68.$cmd", "command": {"query": {"$or": [{"_acl": {"$exists": false}}, {"_acl.*.w": true}], "_id": "5Npn4XbXVF"}, "findandModify": "app_0ecb3ea0-a35a-4fa6-b1a8-2bf66ae160ff:_Installation", "update": {"$set": {"_updated_at": {"$date": 1396457187276}}, "$unset": {}, "$addToSet": {"channels": {"$each": ["", "v5420"]}}}, "new": true}, "ts": {"$date": 1396457187283}, "op": "command"}
 // {"query": {"$or": [{"_acl": {"$exists": false}}, {"_acl.*.w": true}], "_id": "YDHJwP5hFX"}, "updateobj": {"$set": {"_updated_at": {"$date": 1396457119032}}, "$unset": {}}, "ns": "appdata66.app_0939ec2a-b247-4485-b741-bfe069791305:Prize", "op": "update", "ts": {"$date": 1396457119032}}
 func PruneEmptyUpdateObj(doc Document, opType string) {
 	var updateObj map[string]interface{}
 
 	if opType == "command" {
-		// only do this for findandmodify
+		// only do this for findandModify
 		command := doc["command"].(map[string]interface{})
-		if command["findandmodify"] == nil {
+		if command["findandModify"] == nil {
 			return
 		}
 		updateObj = command["update"].(map[string]interface{})
