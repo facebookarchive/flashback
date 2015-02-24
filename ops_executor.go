@@ -1,7 +1,8 @@
-package replay
+package flashback
 
 import (
 	"errors"
+
 	"gopkg.in/mgo.v2"
 )
 

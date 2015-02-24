@@ -1,4 +1,4 @@
-package replay
+package flashback
 
 import (
 	"sort"
@@ -56,21 +56,21 @@ func NewStatsAnalyzer(
 		latencyChan:     latencyChan,
 		latencies:       latencies,
 		epoch:           time.Now(),
-		timeLast:	 time.Now(),
+		timeLast:        time.Now(),
 		lastEndPos:      lastEndPos,
-		counts:		 counts,
-		countsLast:	 countsLast,
+		counts:          counts,
+		countsLast:      countsLast,
 	}
 }
 
 // ExecutionStatus encapsulates the aggregated information for the execution
 type ExecutionStatus struct {
-	OpsExecuted        int64
-	OpsExecutedLast    int64
+	OpsExecuted     int64
+	OpsExecutedLast int64
 	// OpsPerSec stores ops/sec averaged across the entire workload
-	OpsPerSec          float64
+	OpsPerSec float64
 	// OpsPerSecLast stores the ops/sec since the last call to GetStatus()
-	OpsPerSecLast	   float64
+	OpsPerSecLast      float64
 	Duration           time.Duration
 	AllTimeLatencies   map[OpType][]int64
 	SinceLastLatencies map[OpType][]int64
@@ -83,18 +83,18 @@ type ExecutionStatus struct {
 type StatsAnalyzer struct {
 	statsCollectors []*StatsCollector
 	// store total ops executed during the run
-	opsExecuted     *int64
+	opsExecuted *int64
 	// store ops executed at the time of the last GetStatus() call
 	opsExecutedLast int64
 	latencyChan     chan Latency
 	latencies       map[OpType][]int64
 	// Store the start of the run
-	epoch           time.Time
+	epoch time.Time
 	// Store the time of the last GetStatus() call
-	timeLast	time.Time
-	lastEndPos      map[OpType]int
-	counts          map[OpType]int64
-	countsLast	map[OpType]int64
+	timeLast   time.Time
+	lastEndPos map[OpType]int
+	counts     map[OpType]int64
+	countsLast map[OpType]int64
 }
 
 func (self *StatsAnalyzer) GetStatus() *ExecutionStatus {
@@ -108,9 +108,9 @@ func (self *StatsAnalyzer) GetStatus() *ExecutionStatus {
 	lastDuration := time.Now().Sub(self.timeLast)
 	opsPerSecLast := 0.0
 	if lastDuration != 0 {
-		opsPerSecLast = float64(*self.opsExecuted - self.opsExecutedLast) * float64(time.Second) / float64(lastDuration)
+		opsPerSecLast = float64(*self.opsExecuted-self.opsExecutedLast) * float64(time.Second) / float64(lastDuration)
 	}
-	
+
 	self.timeLast = time.Now()
 
 	// Latencies
@@ -131,18 +131,18 @@ func (self *StatsAnalyzer) GetStatus() *ExecutionStatus {
 			CalculateLatencyStats(snapshot[lastEndPos:])
 		allTimeLatencies[opType] = CalculateLatencyStats(snapshot)
 		self.counts[opType] = stats.Count(opType)
-		
+
 		typeOpsSec[opType] = 0.0
 		typeOpsSecLast[opType] = 0.0
 		if duration != 0 {
 			typeOpsSec[opType] = float64(self.counts[opType]) * float64(time.Second) / float64(duration)
 		}
 		if lastDuration != 0 {
-			typeOpsSecLast[opType] = float64(self.counts[opType] - self.countsLast[opType]) * float64(time.Second) / float64(lastDuration)
+			typeOpsSecLast[opType] = float64(self.counts[opType]-self.countsLast[opType]) * float64(time.Second) / float64(lastDuration)
 		}
-		
+
 	}
-	
+
 	// have to copy values for countsLast into a new object before returning them
 	countsLast := make(map[OpType]int64)
 	for _, opType := range AllOpTypes {
@@ -154,7 +154,7 @@ func (self *StatsAnalyzer) GetStatus() *ExecutionStatus {
 		OpsExecutedLast:    self.opsExecutedLast,
 		Duration:           duration,
 		OpsPerSec:          opsPerSec,
-		OpsPerSecLast:	    opsPerSecLast,
+		OpsPerSecLast:      opsPerSecLast,
 		AllTimeLatencies:   allTimeLatencies,
 		SinceLastLatencies: sinceLastLatencies,
 		Counts:             self.counts,
@@ -162,7 +162,7 @@ func (self *StatsAnalyzer) GetStatus() *ExecutionStatus {
 		TypeOpsSec:         typeOpsSec,
 		TypeOpsSecLast:     typeOpsSecLast,
 	}
-	
+
 	// store the latest values in the "last" variables
 	self.opsExecutedLast = *self.opsExecuted
 	for _, opType := range AllOpTypes {

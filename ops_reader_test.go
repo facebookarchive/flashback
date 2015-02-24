@@ -1,12 +1,13 @@
-package replay
+package flashback
 
 import (
 	"bytes"
 	"fmt"
-	. "gopkg.in/check.v1"
-	"gopkg.in/mgo.v2/bson"
 	"testing"
 	"time"
+
+	. "gopkg.in/check.v1"
+	"gopkg.in/mgo.v2/bson"
 )
 
 var (
@@ -55,17 +56,17 @@ func CheckOpsReader(c *C, loader OpsReader) {
 
 func CheckSkipOps(c *C, loader OpsReader) {
 	expectedOpsRead := 0
-	
+
 	// Skip a single op
 	loader.SkipOps(1)
-	
+
 	// Read all remaining ops
 	for op := loader.Next(); op != nil; op = loader.Next() {
 		expectedOpsRead += 1
 		c.Assert(op, Not(Equals), nil)
 		c.Assert(loader.OpsRead(), Equals, expectedOpsRead)
 	}
-	
+
 	// Verify that only 4 ops are read, since we skipped one
 	c.Assert(expectedOpsRead, Equals, 4)
 }
@@ -108,7 +109,7 @@ func (s *TestFileByLineOpsReaderSuite) TestPruneEmptyUpdateObj(c *C) {
 
 func (s *TestFileByLineOpsReaderSuite) TestFileByLineOpsReader(c *C) {
 	logger, _ = NewLogger("", "")
-	
+
 	testJsonString :=
 		`{ "ts": {"$date" : 1396456709421}, "ns": "db.coll", "op": "insert", "o": {"logType1": "warning", "message": "m1"} }
         { "ts": {"$date": 1396456709422}, "ns": "db.coll", "op": "insert", "o": {"logType2": "warning", "message": "m2"} }
@@ -119,7 +120,7 @@ func (s *TestFileByLineOpsReaderSuite) TestFileByLineOpsReader(c *C) {
 	err, loader := NewByLineOpsReader(reader, logger)
 	c.Assert(err, Equals, nil)
 	CheckOpsReader(c, loader)
-	
+
 	// Reset the reader so that we can test SkipOps
 	reader = bytes.NewReader([]byte(testJsonString))
 	err, loader = NewByLineOpsReader(reader, logger)
@@ -165,10 +166,10 @@ func (s *TestFileByLineOpsReaderSuite) TestComplexnormalizeObj(c *C) {
 		},
 		"doc6": map[string]interface{}{
 			"$binary": "dmFsaWRiYXNlNjQ=",
-			"$type": "00",
+			"$type":   "00",
 		},
 		"doc7": map[string]interface{}{
-			"$regex": "abc",
+			"$regex":   "abc",
 			"$options": "gims",
 		},
 		"doc8": map[string]interface{}{

@@ -3,14 +3,15 @@ package main
 import (
 	"errors"
 	"flag"
-	"gopkg.in/mgo.v2"
-	. "replay"
+	"fmt"
+	"math"
+	"os"
 	"runtime"
 	"sync/atomic"
 	"time"
-	"os"
-	"fmt"
-	"math"
+
+	"github.com/ParsePlatform/flashback"
+	"gopkg.in/mgo.v2"
 )
 
 func panicOnError(err error) {
@@ -32,7 +33,7 @@ var (
 	workers       int
 	stderr        string
 	stdout        string
-	logger        *Logger
+	logger        *flashback.Logger
 	statsFilename string
 	statsFile     *os.File
 )
@@ -118,7 +119,7 @@ func parseFlags() error {
 		maxOps = math.MaxUint32
 	}
 	var err error
-	if logger, err = NewLogger(stdout, stderr); err != nil {
+	if logger, err = flashback.NewLogger(stdout, stderr); err != nil {
 		return err
 	}
 	return nil
@@ -131,11 +132,13 @@ func retryOnSocketFailure(block func() error, session *mgo.Session) error {
 	}
 
 	switch err.(type) {
-	case *mgo.QueryError, *mgo.LastError: return err
+	case *mgo.QueryError, *mgo.LastError:
+		return err
 	}
 
 	switch err {
-	case mgo.ErrNotFound, NotSupported: return err
+	case mgo.ErrNotFound, flashback.NotSupported:
+		return err
 	}
 
 	// Otherwise it's probably a socket error so we refresh the connection,
@@ -145,15 +148,15 @@ func retryOnSocketFailure(block func() error, session *mgo.Session) error {
 	return block()
 }
 
-func makeOpsChan(style string, opsFilename string, logger *Logger) (chan *Op, error) {
+func makeOpsChan(style string, opsFilename string, logger *flashback.Logger) (chan *flashback.Op, error) {
 	// Prepare to dispatch ops
 	var (
-		reader OpsReader
+		reader flashback.OpsReader
 		err    error
 	)
 
 	if style == "stress" {
-		err, reader = NewFileByLineOpsReader(opsFilename, logger)
+		err, reader = flashback.NewFileByLineOpsReader(opsFilename, logger)
 		if err != nil {
 			return nil, err
 		}
@@ -168,12 +171,12 @@ func makeOpsChan(style string, opsFilename string, logger *Logger) (chan *Op, er
 				return nil, err
 			}
 		}
-		return NewBestEffortOpsDispatcher(reader, maxOps, logger), nil
+		return flashback.NewBestEffortOpsDispatcher(reader, maxOps, logger), nil
 	}
 
 	// TODO NewCyclicOpsReader: do we really want to make it cyclic?
-	reader = NewCyclicOpsReader(func() OpsReader {
-		err, reader := NewFileByLineOpsReader(opsFilename, logger)
+	reader = flashback.NewCyclicOpsReader(func() flashback.OpsReader {
+		err, reader := flashback.NewFileByLineOpsReader(opsFilename, logger)
 		panicOnError(err)
 		return reader
 	}, logger)
@@ -188,7 +191,7 @@ func makeOpsChan(style string, opsFilename string, logger *Logger) (chan *Op, er
 			return nil, err
 		}
 	}
-	return NewByTimeOpsDispatcher(reader, maxOps, logger), nil
+	return flashback.NewByTimeOpsDispatcher(reader, maxOps, logger), nil
 }
 
 func main() {
@@ -208,13 +211,12 @@ func main() {
 		defer statsFile.Close()
 	}
 
-
-	latencyChan := make(chan Latency, workers)
+	latencyChan := make(chan flashback.Latency, workers)
 
 	// Set up workers to do the job
 	exit := make(chan int)
 	opsExecuted := int64(0)
-	fetch := func(id int, statsCollector IStatsCollector) {
+	fetch := func(id int, statsCollector flashback.IStatsCollector) {
 		logger.Infof("Worker #%d report for duty\n", id)
 
 		session, err := mgo.Dial(url)
@@ -222,7 +224,7 @@ func main() {
 		session.SetSocketTimeout(time.Duration(socketTimeout))
 
 		defer session.Close()
-		exec := OpsExecutorWithStats(session, statsCollector)
+		exec := flashback.OpsExecutorWithStats(session, statsCollector)
 		for {
 			op := <-opsChan
 			if op == nil {
@@ -236,23 +238,23 @@ func main() {
 			if verbose == true && err != nil {
 				logger.Error(fmt.Sprintf(
 					"error executing op - type:%s,database:%s,collection:%s,error:%s",
-					op.Type,op.Database,op.Collection,err))
+					op.Type, op.Database, op.Collection, err))
 			}
 			atomic.AddInt64(&opsExecuted, 1)
 		}
 		exit <- 1
 		logger.Infof("Worker #%d done!\n", id)
 	}
-	statsCollectorList := make([]*StatsCollector, workers)
+	statsCollectorList := make([]*flashback.StatsCollector, workers)
 	for i := 0; i < workers; i++ {
-		statsCollectorList[i] = NewStatsCollector()
+		statsCollectorList[i] = flashback.NewStatsCollector()
 		statsCollectorList[i].SampleLatencies(sampleRate, latencyChan)
 		go fetch(i, statsCollectorList[i])
 	}
 
 	// Periodically report execution status
 	go func() {
-		statsAnalyzer := NewStatsAnalyzer(statsCollectorList, &opsExecuted,
+		statsAnalyzer := flashback.NewStatsAnalyzer(statsCollectorList, &opsExecuted,
 			latencyChan, int(sampleRate*float64(maxOps)))
 		toFloat := func(nano int64) float64 {
 			return float64(nano) / float64(1e6)
@@ -270,7 +272,7 @@ func main() {
 				statsLineOutput = fmt.Sprintf("%s,%d,%.2f", timestamp, (status.OpsExecuted - status.OpsExecutedLast), status.OpsPerSecLast)
 			}
 
-			for _, opType := range AllOpTypes {
+			for _, opType := range flashback.AllOpTypes {
 				allTime := status.AllTimeLatencies[opType]
 				sinceLast := status.SinceLastLatencies[opType]
 				logger.Infof("  Op type: %s, count: %d, avg ops/sec: %.2f, last ops/sec: %.2f",
@@ -278,18 +280,18 @@ func main() {
 					status.TypeOpsSec[opType], status.TypeOpsSecLast[opType])
 				template := "   %s: P50: %.2fms, P70: %.2fms, P90: %.2fms, " +
 					"P95 %.2fms, P99 %.2fms, Max %.2fms\n"
-				logger.Infof(template, "Total", toFloat(allTime[P50]),
-					toFloat(allTime[P70]), toFloat(allTime[P90]),
-					toFloat(allTime[P95]), toFloat(allTime[P99]),
-					toFloat(allTime[P100]))
-				logger.Infof(template, "Last ", toFloat(sinceLast[P50]),
-					toFloat(sinceLast[P70]), toFloat(sinceLast[P90]),
-					toFloat(sinceLast[P95]), toFloat(sinceLast[P99]),
-					toFloat(sinceLast[P100]))
+				logger.Infof(template, "Total", toFloat(allTime[flashback.P50]),
+					toFloat(allTime[flashback.P70]), toFloat(allTime[flashback.P90]),
+					toFloat(allTime[flashback.P95]), toFloat(allTime[flashback.P99]),
+					toFloat(allTime[flashback.P100]))
+				logger.Infof(template, "Last ", toFloat(sinceLast[flashback.P50]),
+					toFloat(sinceLast[flashback.P70]), toFloat(sinceLast[flashback.P90]),
+					toFloat(sinceLast[flashback.P95]), toFloat(sinceLast[flashback.P99]),
+					toFloat(sinceLast[flashback.P100]))
 
 				if statsFilename != "" {
 					statsLineOutput = fmt.Sprintf("%s,%d,%.2f", statsLineOutput,
-							(status.Counts[opType] - status.CountsLast[opType]), status.TypeOpsSecLast[opType])
+						(status.Counts[opType] - status.CountsLast[opType]), status.TypeOpsSecLast[opType])
 				}
 			}
 
