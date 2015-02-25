@@ -37,9 +37,10 @@ func (s *TestExecutorSuite) TestExecution(c *C) {
 		test_db, test_collection)
 	cmd, err := parseJson(insertCmd)
 	c.Assert(err, IsNil)
-	op := makeOp(cmd)
-
-	exec := NewOpsExecutor(session)
+	op := CanonicalizeOp(makeOp(cmd, make([]string, 0)))
+	logger, err := NewLogger("", "")
+	c.Assert(err, IsNil)
+	exec := NewOpsExecutor(session, nil, logger)
 	err = exec.Execute(op)
 	c.Assert(err, IsNil)
 	coll := session.DB(test_db).C(test_collection)
@@ -53,7 +54,7 @@ func (s *TestExecutorSuite) TestExecution(c *C) {
 		`"ns": "%s.%s", "op": "query"}`, test_db, test_collection)
 	cmd, err = parseJson(findCmd)
 	c.Assert(err, IsNil)
-	findOp := makeOp(cmd)
+	findOp := CanonicalizeOp(makeOp(cmd, make([]string, 0)))
 
 	err = exec.Execute(findOp)
 	c.Assert(err, IsNil)
@@ -69,7 +70,7 @@ func (s *TestExecutorSuite) TestExecution(c *C) {
 		`"ns": "%s.%s", "op": "update"}`, test_db, test_collection)
 	cmd, err = parseJson(updateCmd)
 	c.Assert(err, IsNil)
-	err = exec.Execute(makeOp(cmd))
+	err = exec.Execute(CanonicalizeOp(makeOp(cmd, make([]string, 0))))
 	c.Assert(err, IsNil)
 
 	err = exec.Execute(findOp)
@@ -86,7 +87,7 @@ func (s *TestExecutorSuite) TestExecution(c *C) {
 			`"update": {"$set": {"logType": "foobar"}}}, "op": "command"}`, test_db, test_collection)
 	cmd, err = parseJson(famCmd)
 	c.Assert(err, IsNil)
-	err = exec.Execute(makeOp(cmd))
+	err = exec.Execute(CanonicalizeOp(makeOp(cmd, make([]string, 0))))
 	c.Assert(err, IsNil)
 
 	err = exec.Execute(findOp)
@@ -102,7 +103,7 @@ func (s *TestExecutorSuite) TestExecution(c *C) {
 		test_db, test_collection)
 	cmd, err = parseJson(removeCmd)
 	c.Assert(err, IsNil)
-	err = exec.Execute(makeOp(cmd))
+	err = exec.Execute(CanonicalizeOp(makeOp(cmd, make([]string, 0))))
 	c.Assert(err, IsNil)
 
 	err = exec.Execute(findOp)

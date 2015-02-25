@@ -1,193 +1,198 @@
 package flashback
 
 import (
-	"sort"
+	"github.com/bmizerany/perks/quantile"
+	"sync"
 	"time"
 )
 
+type OpStat struct {
+	OpType  OpType
+	Latency time.Duration
+	OpError bool
+}
+
 var (
-	latencyPercentiles = []int{50, 60, 70, 80, 90, 95, 99, 100}
-	emptyLatencies     = make([]int64, len(latencyPercentiles))
+	latencyPercentiles = []float64{0.5, 0.7, 0.9, 0.95, 0.99}
 )
 
 // Percentiles
 const (
-	P50  = iota
-	P60  = iota
-	P70  = iota
-	P80  = iota
-	P90  = iota
-	P95  = iota
-	P99  = iota
-	P100 = iota
+	P50 = iota
+	P70 = iota
+	P90 = iota
+	P95 = iota
+	P99 = iota
 )
 
-func NewStatsAnalyzer(
-	statsCollectors []*StatsCollector,
-	opsExecuted *int64,
-	latencyChan chan Latency,
-	latenciesSize int) *StatsAnalyzer {
-	latencies := map[OpType][]int64{}
-	lastEndPos := map[OpType]int{}
-	counts := make(map[OpType]int64)
-	countsLast := make(map[OpType]int64)
+type StatsAnalyzer struct {
+	statsChan chan OpStat
 
+	startTime   time.Time
+	stream      map[OpType]*quantile.Stream
+	maxLatency  map[OpType]float64
+	opsExecuted int64
+	opsErrors   int64
+	counts      map[OpType]int64
+
+	intervalStartTime   time.Time
+	intervalStream      map[OpType]*quantile.Stream
+	intervalMaxLatency  map[OpType]float64
+	intervalOpsExecuted int64
+	intervalOpsErrors   int64
+	intervalCounts      map[OpType]int64
+
+	mutex *sync.Mutex
+}
+
+func (s *StatsAnalyzer) process(opStat OpStat) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	s.counts[opStat.OpType]++
+	s.intervalCounts[opStat.OpType]++
+	s.opsExecuted++
+	s.intervalOpsExecuted++
+	if opStat.OpError == true {
+		s.opsErrors++
+		s.intervalOpsErrors++
+	}
+
+	latencyMs := float64(opStat.Latency) / float64(time.Millisecond)
+	s.stream[opStat.OpType].Insert(latencyMs)
+	s.intervalStream[opStat.OpType].Insert(latencyMs)
+
+	if s.maxLatency[opStat.OpType] < latencyMs {
+		s.maxLatency[opStat.OpType] = latencyMs
+	}
+	if s.intervalMaxLatency[opStat.OpType] < latencyMs {
+		s.intervalMaxLatency[opStat.OpType] = latencyMs
+	}
+}
+
+func NewStatsAnalyzer(statsChan chan OpStat) *StatsAnalyzer {
+	stream := make(map[OpType]*quantile.Stream)
+	intervalStream := make(map[OpType]*quantile.Stream)
 	for _, opType := range AllOpTypes {
-		latencies[opType] = make([]int64, 0, latenciesSize)
-		lastEndPos[opType] = 0
+		stream[opType] = quantile.NewTargeted(0.5, 0.7, 0.9, 0.95, 0.99)
+		intervalStream[opType] = quantile.NewTargeted(0.5, 0.7, 0.9, 0.95, 0.99)
+	}
+	statsAnalyzer := &StatsAnalyzer{
+		statsChan:           statsChan,
+		startTime:           time.Now(),
+		stream:              stream,
+		maxLatency:          make(map[OpType]float64),
+		opsExecuted:         0,
+		opsErrors:           0,
+		counts:              make(map[OpType]int64),
+		intervalStartTime:   time.Now(),
+		intervalStream:      intervalStream,
+		intervalMaxLatency:  make(map[OpType]float64),
+		intervalOpsExecuted: 0,
+		intervalOpsErrors:   0,
+		intervalCounts:      make(map[OpType]int64),
+		mutex:               &sync.Mutex{},
 	}
 
 	go func() {
 		for {
-			op, ok := <-latencyChan
+			op, ok := <-statsAnalyzer.statsChan
 			if !ok {
 				break
 			}
-			latencies[op.OpType] = append(
-				latencies[op.OpType], int64(op.Latency),
-			)
+			statsAnalyzer.process(op)
 		}
 	}()
 
-	return &StatsAnalyzer{
-		statsCollectors: statsCollectors,
-		opsExecuted:     opsExecuted,
-		opsExecutedLast: 0,
-		latencyChan:     latencyChan,
-		latencies:       latencies,
-		epoch:           time.Now(),
-		timeLast:        time.Now(),
-		lastEndPos:      lastEndPos,
-		counts:          counts,
-		countsLast:      countsLast,
-	}
+	return statsAnalyzer
 }
 
 // ExecutionStatus encapsulates the aggregated information for the execution
 type ExecutionStatus struct {
-	OpsExecuted     int64
-	OpsExecutedLast int64
-	// OpsPerSec stores ops/sec averaged across the entire workload
-	OpsPerSec float64
-	// OpsPerSecLast stores the ops/sec since the last call to GetStatus()
-	OpsPerSecLast      float64
-	Duration           time.Duration
-	AllTimeLatencies   map[OpType][]int64
-	SinceLastLatencies map[OpType][]int64
-	Counts             map[OpType]int64
-	CountsLast         map[OpType]int64
-	TypeOpsSec         map[OpType]float64
-	TypeOpsSecLast     map[OpType]float64
-}
-
-type StatsAnalyzer struct {
-	statsCollectors []*StatsCollector
-	// store total ops executed during the run
-	opsExecuted *int64
-	// store ops executed at the time of the last GetStatus() call
-	opsExecutedLast int64
-	latencyChan     chan Latency
-	latencies       map[OpType][]int64
-	// Store the start of the run
-	epoch time.Time
-	// Store the time of the last GetStatus() call
-	timeLast   time.Time
-	lastEndPos map[OpType]int
-	counts     map[OpType]int64
-	countsLast map[OpType]int64
+	OpsExecuted         int64
+	IntervalOpsExecuted int64
+	OpsErrors           int64
+	IntervalOpsErrors   int64
+	OpsPerSec           float64
+	IntervalOpsPerSec   float64
+	IntervalDuration    time.Duration
+	Latencies           map[OpType][]float64
+	IntervalLatencies   map[OpType][]float64
+	MaxLatency          map[OpType]float64
+	IntervalMaxLatency  map[OpType]float64
+	Counts              map[OpType]int64
+	IntervalCounts      map[OpType]int64
+	TypeOpsSec          map[OpType]float64
+	IntervalTypeOpsSec  map[OpType]float64
 }
 
 func (s *StatsAnalyzer) GetStatus() *ExecutionStatus {
-	// Basics
-	duration := time.Now().Sub(s.epoch)
-	opsPerSec := 0.0
-	if duration != 0 {
-		opsPerSec = float64(*s.opsExecuted) * float64(time.Second) / float64(duration)
-	}
-	// Calculate ops/sec since last call to GetStatus()
-	lastDuration := time.Now().Sub(s.timeLast)
-	opsPerSecLast := 0.0
-	if lastDuration != 0 {
-		opsPerSecLast = float64(*s.opsExecuted-s.opsExecutedLast) * float64(time.Second) / float64(lastDuration)
-	}
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
 
-	s.timeLast = time.Now()
+	opsExecuted := s.opsExecuted
+	intervalOpsExecuted := s.intervalOpsExecuted
+	opsErrors := s.opsErrors
+	intervalOpsErrors := s.intervalOpsErrors
 
-	// Latencies
-	stats := CombineStats(s.statsCollectors...)
-	allTimeLatencies := make(map[OpType][]int64)
-	sinceLastLatencies := make(map[OpType][]int64)
+	now := time.Now()
+	durationSec := float64(now.Sub(s.startTime)) / float64(time.Second)
+	opsPerSec := float64(opsExecuted) / durationSec
+	intervalDuration := now.Sub(s.intervalStartTime)
+	intervalDurationSec := float64(intervalDuration) / float64(time.Second)
+	intervalOpsPerSec := float64(intervalOpsExecuted) / intervalDurationSec
+
+	latencies := make(map[OpType][]float64)
+	intervalLatencies := make(map[OpType][]float64)
+	counts := make(map[OpType]int64)
+	intervalCounts := make(map[OpType]int64)
 	typeOpsSec := make(map[OpType]float64)
-	typeOpsSecLast := make(map[OpType]float64)
+	intervalTypeOpsSec := make(map[OpType]float64)
+	maxLatency := make(map[OpType]float64)
+	intervalMaxLatency := make(map[OpType]float64)
 
 	for _, opType := range AllOpTypes {
-		// take a snapshot of current status since the latency list keeps
-		// increasing.
-		length := len(s.latencies[opType])
-		snapshot := s.latencies[opType][:length]
-		lastEndPos := s.lastEndPos[opType]
-		s.lastEndPos[opType] = length
-		sinceLastLatencies[opType] =
-			CalculateLatencyStats(snapshot[lastEndPos:])
-		allTimeLatencies[opType] = CalculateLatencyStats(snapshot)
-		s.counts[opType] = stats.Count(opType)
-
-		typeOpsSec[opType] = 0.0
-		typeOpsSecLast[opType] = 0.0
-		if duration != 0 {
-			typeOpsSec[opType] = float64(s.counts[opType]) * float64(time.Second) / float64(duration)
+		maxLatency[opType] = s.maxLatency[opType]
+		intervalMaxLatency[opType] = s.intervalMaxLatency[opType]
+		for _, percentile := range latencyPercentiles {
+			latencies[opType] = append(latencies[opType], s.stream[opType].Query(percentile))
+			intervalLatencies[opType] = append(intervalLatencies[opType],
+				s.intervalStream[opType].Query(percentile))
 		}
-		if lastDuration != 0 {
-			typeOpsSecLast[opType] = float64(s.counts[opType]-s.countsLast[opType]) * float64(time.Second) / float64(lastDuration)
-		}
+		counts[opType] = s.counts[opType]
+		intervalCounts[opType] = s.intervalCounts[opType]
 
-	}
-
-	// have to copy values for countsLast into a new object before returning them
-	countsLast := make(map[OpType]int64)
-	for _, opType := range AllOpTypes {
-		countsLast[opType] = s.countsLast[opType]
+		typeOpsSec[opType] = float64(s.counts[opType]) / durationSec
+		intervalTypeOpsSec[opType] = float64(s.intervalCounts[opType]) / intervalDurationSec
 	}
 
 	status := ExecutionStatus{
-		OpsExecuted:        *s.opsExecuted,
-		OpsExecutedLast:    s.opsExecutedLast,
-		Duration:           duration,
-		OpsPerSec:          opsPerSec,
-		OpsPerSecLast:      opsPerSecLast,
-		AllTimeLatencies:   allTimeLatencies,
-		SinceLastLatencies: sinceLastLatencies,
-		Counts:             s.counts,
-		CountsLast:         countsLast,
-		TypeOpsSec:         typeOpsSec,
-		TypeOpsSecLast:     typeOpsSecLast,
+		OpsExecuted:         opsExecuted,
+		IntervalOpsExecuted: intervalOpsExecuted,
+		OpsErrors:           opsErrors,
+		IntervalOpsErrors:   intervalOpsErrors,
+		OpsPerSec:           opsPerSec,
+		IntervalOpsPerSec:   intervalOpsPerSec,
+		IntervalDuration:    intervalDuration,
+		Latencies:           latencies,
+		IntervalLatencies:   intervalLatencies,
+		MaxLatency:          maxLatency,
+		IntervalMaxLatency:  intervalMaxLatency,
+		Counts:              counts,
+		IntervalCounts:      intervalCounts,
+		TypeOpsSec:          typeOpsSec,
+		IntervalTypeOpsSec:  intervalTypeOpsSec,
 	}
 
-	// store the latest values in the "last" variables
-	s.opsExecutedLast = *s.opsExecuted
+	// reset interval
+	s.intervalStartTime = now
 	for _, opType := range AllOpTypes {
-		s.countsLast[opType] = s.counts[opType]
+		s.intervalStream[opType].Reset()
+		s.intervalCounts[opType] = 0
+		s.intervalMaxLatency[opType] = 0
 	}
+	s.intervalOpsExecuted = 0
+	s.intervalOpsErrors = 0
 
 	return &status
-}
-
-// Sorting facilities
-type int64Slice []int64
-
-func (p int64Slice) Len() int           { return len(p) }
-func (p int64Slice) Less(i, j int) bool { return p[i] < p[j] }
-func (p int64Slice) Swap(i, j int)      { p[i], p[j] = p[j], p[i] }
-
-func CalculateLatencyStats(latencies []int64) []int64 {
-	result := make([]int64, 0, len(latencyPercentiles))
-	length := len(latencies)
-	if length == 0 {
-		return emptyLatencies
-	}
-	sort.Sort(int64Slice(latencies))
-	for _, perc := range latencyPercentiles {
-		result = append(result, latencies[(length-1)*perc/100])
-	}
-	return result
 }

@@ -52,25 +52,31 @@ type ByLineOpsReader struct {
 	opsRead    int
 	closeFunc  func()
 	logger     *Logger
+	opFilters  []string
 }
 
-func NewByLineOpsReader(reader io.Reader, logger *Logger) (error, *ByLineOpsReader) {
+func NewByLineOpsReader(reader io.Reader, logger *Logger, opFilter string) (error, *ByLineOpsReader) {
+	opFilters := make([]string, 0)
+	if opFilter != "" {
+		opFilters = strings.Split(opFilter, ",")
+	}
 	return nil, &ByLineOpsReader{
 		lineReader: bufio.NewReaderSize(reader, 5*1024*1024),
 		err:        nil,
 		opsRead:    0,
 		logger:     logger,
+		opFilters:  opFilters,
 	}
 }
 
 // func NewCyclicOpsReader(func() ops_reader_maker *OpsReader) (error, OpsReader)
 
-func NewFileByLineOpsReader(filename string, logger *Logger) (error, *ByLineOpsReader) {
+func NewFileByLineOpsReader(filename string, logger *Logger, opFilter string) (error, *ByLineOpsReader) {
 	file, err := os.Open(filename)
 	if err != nil {
 		return err, nil
 	}
-	err, reader := NewByLineOpsReader(file, logger)
+	err, reader := NewByLineOpsReader(file, logger, opFilter)
 	if err != nil {
 		return err, reader
 	}
@@ -140,7 +146,7 @@ func (r *ByLineOpsReader) Next() *Op {
 			return nil
 		}
 		r.opsRead++
-		op := makeOp(rawObj)
+		op := makeOp(rawObj, r.opFilters)
 		if op == nil {
 			continue
 		}
@@ -219,12 +225,25 @@ func PruneEmptyUpdateObj(doc Document, opType string) {
 	}
 }
 
-func makeOp(rawDoc Document) *Op {
+func makeOp(rawDoc Document, opFilters []string) *Op {
 	opType := rawDoc["op"].(string)
 	ts := rawDoc["ts"].(time.Time)
 	ns := rawDoc["ns"].(string)
 	parts := strings.SplitN(ns, ".", 2)
 	dbName, collName := parts[0], parts[1]
+
+	if len(opFilters) != 0 {
+		filtered := false
+		for _, opFilter := range opFilters {
+			if opType == opFilter {
+				filtered = true
+				break
+			}
+		}
+		if filtered == false {
+			return nil
+		}
+	}
 
 	var content Document
 	// we only handpick the fields that will be of useful for a given op type.

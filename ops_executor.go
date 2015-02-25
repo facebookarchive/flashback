@@ -2,8 +2,8 @@ package flashback
 
 import (
 	"errors"
-
 	"gopkg.in/mgo.v2"
+	"time"
 )
 
 var (
@@ -13,20 +13,22 @@ var (
 type execute func(content Document, collection *mgo.Collection) error
 
 type OpsExecutor struct {
-	session        *mgo.Session
-	statsCollector IStatsCollector
+	session   *mgo.Session
+	statsChan chan OpStat
+	logger    *Logger
 
 	// keep track of the results retrieved by find(). For verification purpose
 	// only.
 	lastResult  interface{}
+	lastLatency time.Duration
 	subExecutes map[OpType]execute
 }
 
-func OpsExecutorWithStats(session *mgo.Session,
-	statsCollector IStatsCollector) *OpsExecutor {
+func NewOpsExecutor(session *mgo.Session, statsChan chan OpStat, logger *Logger) *OpsExecutor {
 	e := &OpsExecutor{
-		session:        session,
-		statsCollector: statsCollector,
+		session:   session,
+		statsChan: statsChan,
+		logger:    logger,
 	}
 
 	e.subExecutes = map[OpType]execute{
@@ -38,10 +40,6 @@ func OpsExecutorWithStats(session *mgo.Session,
 		FindAndModify: e.execFindAndModify,
 	}
 	return e
-}
-
-func NewOpsExecutor(session *mgo.Session) *OpsExecutor {
-	return OpsExecutorWithStats(session, NewNullStatsCollector())
 }
 
 func (e *OpsExecutor) execQuery(
@@ -91,7 +89,7 @@ func (e *OpsExecutor) execFindAndModify(content Document, coll *mgo.Collection) 
 // We do not canonicalize the ops in OpsReader because we hope ops reader to do
 // its job honestly and the consumer of these ops decide how to further process
 // the original ops.
-func canonicalizeOp(op *Op) *Op {
+func CanonicalizeOp(op *Op) *Op {
 	if op.Type != Command {
 		return op
 	}
@@ -114,17 +112,54 @@ func canonicalizeOp(op *Op) *Op {
 	return nil
 }
 
-func (e *OpsExecutor) Execute(op *Op) error {
-	op = canonicalizeOp(op)
-	if op == nil {
-		return NotSupported
+func retryOnSocketFailure(block func() error, session *mgo.Session, logger *Logger) error {
+	err := block()
+	if err == nil {
+		return nil
 	}
 
-	e.statsCollector.StartOp(op.Type)
-	defer e.statsCollector.EndOp()
+	switch err.(type) {
+	case *mgo.QueryError, *mgo.LastError:
+		return err
+	}
 
-	content := op.Content
-	coll := e.session.DB(op.Database).C(op.Collection)
+	switch err {
+	case mgo.ErrNotFound, NotSupported:
+		return err
+	}
 
-	return e.subExecutes[op.Type](content, coll)
+	// Otherwise it's probably a socket error so we refresh the connection,
+	// and try again
+	session.Refresh()
+	logger.Error("retrying mongo query after error: ", err)
+	return block()
+}
+
+func (e *OpsExecutor) Execute(op *Op) error {
+	startOp := time.Now()
+
+	block := func() error {
+		content := op.Content
+		coll := e.session.DB(op.Database).C(op.Collection)
+		return e.subExecutes[op.Type](content, coll)
+	}
+	err := retryOnSocketFailure(block, e.session, e.logger)
+
+	latencyOp := time.Now().Sub(startOp)
+	e.lastLatency = latencyOp
+
+	if e.statsChan != nil {
+		if err == nil {
+			e.statsChan <- OpStat{op.Type, latencyOp, false}
+		} else {
+			// error condition
+			e.statsChan <- OpStat{op.Type, latencyOp, true}
+		}
+	}
+
+	return err
+}
+
+func (e *OpsExecutor) LastLatency() time.Duration {
+	return e.lastLatency
 }
