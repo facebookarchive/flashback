@@ -80,9 +80,9 @@ func NewFileByLineOpsReader(filename string, logger *Logger) (error, *ByLineOpsR
 	return nil, reader
 }
 
-func (loader *ByLineOpsReader) SkipOps(numSkipOps int) error {
+func (r *ByLineOpsReader) SkipOps(numSkipOps int) error {
 	for numSkipped := 0; numSkipped < numSkipOps; numSkipped++ {
-		_, err := loader.lineReader.ReadString('\n')
+		_, err := r.lineReader.ReadString('\n')
 
 		// Return if we get an error reading the error, or hit EOF
 		if err != nil || err == io.EOF {
@@ -90,17 +90,17 @@ func (loader *ByLineOpsReader) SkipOps(numSkipOps int) error {
 		}
 	}
 
-	loader.logger.Infof("Done skipping %d ops.\n", numSkipOps)
+	r.logger.Infof("Done skipping %d ops.\n", numSkipOps)
 	return nil
 }
 
-func (loader *ByLineOpsReader) SetStartTime(startTime int64) (int64, error) {
+func (r *ByLineOpsReader) SetStartTime(startTime int64) (int64, error) {
 	var numSkipped int64
 	searchTime := time.Unix(startTime/1000, startTime%1000*1000000)
 
 	for true {
 		// The nature of this function is that it will discard the first op
-		jsonText, err := loader.lineReader.ReadString('\n')
+		jsonText, err := r.lineReader.ReadString('\n')
 		numSkipped++
 
 		// Return if we get an error reading the error, or hit EOF
@@ -116,7 +116,7 @@ func (loader *ByLineOpsReader) SetStartTime(startTime int64) (int64, error) {
 		timestamp := rawObj["ts"].(time.Time)
 		if timestamp.After(searchTime) || timestamp.Equal(searchTime) {
 			actualTime := timestamp
-			loader.logger.Infof("Skipped %d ops to begin at timestamp %d.", numSkipped, actualTime)
+			r.logger.Infof("Skipped %d ops to begin at timestamp %d.", numSkipped, actualTime)
 			return numSkipped, nil
 		}
 	}
@@ -124,22 +124,22 @@ func (loader *ByLineOpsReader) SetStartTime(startTime int64) (int64, error) {
 	return numSkipped, errors.New("no ops found after specified start_time")
 }
 
-func (loader *ByLineOpsReader) Next() *Op {
+func (r *ByLineOpsReader) Next() *Op {
 	// we may need to skip certain type of ops
 	for {
-		jsonText, err := loader.lineReader.ReadString('\n')
-		loader.err = err
+		jsonText, err := r.lineReader.ReadString('\n')
+		r.err = err
 
 		if err != nil && err != io.EOF {
 			return nil
 		}
 
 		rawObj, err := parseJson(jsonText)
-		loader.err = err
+		r.err = err
 		if err != nil {
 			return nil
 		}
-		loader.opsRead++
+		r.opsRead++
 		op := makeOp(rawObj)
 		if op == nil {
 			continue
@@ -149,20 +149,20 @@ func (loader *ByLineOpsReader) Next() *Op {
 	}
 }
 
-func (loader *ByLineOpsReader) OpsRead() int {
-	return loader.opsRead
+func (r *ByLineOpsReader) OpsRead() int {
+	return r.opsRead
 }
 
-func (loader *ByLineOpsReader) AllLoaded() bool {
-	return loader.err == io.EOF
+func (r *ByLineOpsReader) AllLoaded() bool {
+	return r.err == io.EOF
 }
 
-func (loader *ByLineOpsReader) Err() error {
-	return loader.err
+func (r *ByLineOpsReader) Err() error {
+	return r.err
 }
-func (loader *ByLineOpsReader) Close() {
-	if loader.closeFunc != nil {
-		loader.closeFunc()
+func (r *ByLineOpsReader) Close() {
+	if r.closeFunc != nil {
+		r.closeFunc()
 	}
 }
 
@@ -278,45 +278,45 @@ func NewCyclicOpsReader(maker func() OpsReader, logger *Logger) *CyclicOpsReader
 	}
 }
 
-func (self *CyclicOpsReader) Next() *Op {
+func (c *CyclicOpsReader) Next() *Op {
 	var op *Op = nil
-	if op = self.reader.Next(); op == nil {
-		self.logger.Info("Recycle starts")
-		self.previousRead += self.reader.OpsRead()
-		self.reader.Close()
-		self.reader = self.maker()
-		op = self.reader.Next()
+	if op = c.reader.Next(); op == nil {
+		c.logger.Info("Recycle starts")
+		c.previousRead += c.reader.OpsRead()
+		c.reader.Close()
+		c.reader = c.maker()
+		op = c.reader.Next()
 	}
 	if op == nil {
-		self.err = errors.New("The underlying ops reader is empty or invalid")
+		c.err = errors.New("The underlying ops reader is empty or invalid")
 	}
 	return op
 
 }
 
-func (self *CyclicOpsReader) OpsRead() int {
-	return self.reader.OpsRead() + self.previousRead
+func (c *CyclicOpsReader) OpsRead() int {
+	return c.reader.OpsRead() + c.previousRead
 }
 
-func (self *CyclicOpsReader) AllLoaded() bool {
+func (c *CyclicOpsReader) AllLoaded() bool {
 	return false
 }
 
-func (self *CyclicOpsReader) SkipOps(numSkipOps int) error {
-	return self.reader.SkipOps(numSkipOps)
+func (c *CyclicOpsReader) SkipOps(numSkipOps int) error {
+	return c.reader.SkipOps(numSkipOps)
 }
 
-func (self *CyclicOpsReader) SetStartTime(startTime int64) (int64, error) {
-	return self.reader.SetStartTime(startTime)
+func (c *CyclicOpsReader) SetStartTime(startTime int64) (int64, error) {
+	return c.reader.SetStartTime(startTime)
 }
 
-func (self *CyclicOpsReader) Err() error {
-	if self.err != nil {
-		return self.err
+func (c *CyclicOpsReader) Err() error {
+	if c.err != nil {
+		return c.err
 	}
-	return self.reader.Err()
+	return c.reader.Err()
 }
 
-func (self *CyclicOpsReader) Close() {
-	self.reader.Close()
+func (c *CyclicOpsReader) Close() {
+	c.reader.Close()
 }
