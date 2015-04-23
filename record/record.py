@@ -183,8 +183,7 @@ class MongoQueryRecorder(object):
             tailer = utils.get_oplog_tailer(client, ["i"],
                                             self.config["target_databases"],
                                             self.config["target_collections"],
-					    None
-                                            )
+					    Timestamp(start_utc_secs, 0)) 
             oplog_cursor_id = tailer.cursor_id
             workers_info.append({
                 "name": "tailing-oplogs on %s" % (profiler_name),
