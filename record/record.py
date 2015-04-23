@@ -13,7 +13,6 @@ import time
 import utils
 import signal
 import merge
-import sys
 
 
 def tail_to_queue(tailer, identifier, doc_queue, state, end_time,
@@ -46,10 +45,10 @@ def tail_to_queue(tailer, identifier, doc_queue, state, end_time,
             tailer_state.last_get_none_ts = datetime.now()
             time.sleep(check_duration_secs)
         except pymongo.errors.OperationFailure, e:
-	    if preformed_loops == 0:
-	        utils.LOG.error(
-                    "source %s: We appear to not have the %s collection create or is non-capped! %s",
-                    identifier, tailer.collection,e)
+            if preformed_loops == 0:
+                utils.LOG.error(
+                    "source %s: We appear to not have the %s collection created or is non-capped! %s",
+                    identifier, tailer.collection, e)
         preformed_loops += 1
 
     tailer_state.alive = False
@@ -183,7 +182,7 @@ class MongoQueryRecorder(object):
             tailer = utils.get_oplog_tailer(client, ["i"],
                                             self.config["target_databases"],
                                             self.config["target_collections"],
-					    Timestamp(start_utc_secs, 0)) 
+                                            Timestamp(start_utc_secs, 0))
             oplog_cursor_id = tailer.cursor_id
             workers_info.append({
                 "name": "tailing-oplogs on %s" % (profiler_name),
