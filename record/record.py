@@ -99,7 +99,7 @@ class MongoQueryRecorder(object):
             server_string = "%s:%s" % (nodelist[0][0], nodelist[0][1])
 
             self.oplog_clients[server_string] = self.connect_mongo(server)
-            utils.LOG.info("oplog server %d: %s", index, str(server))
+            utils.LOG.info("oplog server %d: %s", index, self.sanatize_server(server))
 
         # create a mongo client for each profiler server
         self.profiler_clients = {}
@@ -109,7 +109,15 @@ class MongoQueryRecorder(object):
             server_string = "%s:%s" % (nodelist[0][0], nodelist[0][1])
 
             self.profiler_clients[server_string] = self.connect_mongo(server)
-            utils.LOG.info("profiling server %d: %s", index, str(server))
+            utils.LOG.info("profiling server %d: %s", index, self.sanatize_server(server))
+
+    def sanatzie_server(server_config):
+        if 'user' in server_config:
+            server_config['user'] = "Redacted"
+        if 'password' in server_config:
+            server_config['password'] = "Redacted"
+        print(server_config)
+        return server_config
 
     @staticmethod
     def _process_doc_queue(doc_queue, files, state):
