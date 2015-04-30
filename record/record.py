@@ -224,7 +224,7 @@ class MongoQueryRecorder(object):
                     if self.config['auto_config_options']['use_secondiaries'] is True:
                         for node in self.topology[shard]['secondaries']:
                             temp_server = {
-                                'mongodb_uri': self.topology[shard]['primary'],
+                                'mongodb_uri': node,
                                 'auth_db':  config_options['auth_db'],
                                 'user':     config_options['user'],
                                 'password': config_options['password']
