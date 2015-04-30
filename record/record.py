@@ -13,7 +13,7 @@ import time
 import utils
 import signal
 import merge
-import fcntl
+import sys
 
 
 def tail_to_queue(tailer, identifier, doc_queue, state, end_time,
@@ -48,7 +48,7 @@ def tail_to_queue(tailer, identifier, doc_queue, state, end_time,
         except pymongo.errors.OperationFailure, e:
             if preformed_loops == 0:
                 utils.LOG.error(
-                    "source %s: We appear to not have the %s collection created or is non-capped! %s",
+                    "BADRUN: source %s: We appear to not have the %s collection created or is non-capped! %s",
                     identifier, tailer.collection, e)
         preformed_loops += 1
 
@@ -89,7 +89,7 @@ class MongoQueryRecorder(object):
         if self.config["target_collections"] is not None:
             self.config["target_collections"] = set(
                 [coll.strip() for coll in self.config["target_collections"]])
-        if self.config['auto_config'] is True:
+        if 'auto_config' in self.config and self.config['auto_config'] is True:
             if 'auth_db' not in self.config['auto_config_options']:
                 try:
                     self.config['auto_config_options']['auth_db'] = self.config['auth_db']
@@ -112,6 +112,10 @@ class MongoQueryRecorder(object):
         else:
             oplog_servers = self.config["oplog_servers"]
             profiler_servers = self.config["profiler_servers"]
+
+        if len(oplog_servers) < 1 or len(profiler_servers) < 1:
+            utils.log.error("Detected either no profile or oplog servers, bailing")
+            sys.exit(1)
 
         self.oplog_clients = {}
         for index, server in enumerate(oplog_servers):
@@ -243,6 +247,7 @@ class MongoQueryRecorder(object):
                 except Exception, e:
                     utils.log.error("Unable to authenticated to %s: %s " %
                                     (server_config['mongodb_uri'], e))
+                    sys.exit(1)
         return client
 
     def force_quit_all(self):
