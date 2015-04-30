@@ -13,6 +13,7 @@ import time
 import utils
 import signal
 import merge
+import fcntl
 
 
 def tail_to_queue(tailer, identifier, doc_queue, state, end_time,
@@ -88,9 +89,29 @@ class MongoQueryRecorder(object):
         if self.config["target_collections"] is not None:
             self.config["target_collections"] = set(
                 [coll.strip() for coll in self.config["target_collections"]])
+        if self.config['auto_config'] is True:
+            if 'auth_db' not in self.config['auto_config_options']:
+                try:
+                    self.config['auto_config_options']['auth_db'] = self.config['auth_db']
+                except Exception:
+                    pass
+            if 'user' not in self.config['auto_config_options']:
+                try:
+                    self.config['auto_config_options']['user'] = self.config['user']
+                except Exception:
+                    pass
+            if 'password' not in self.config['auto_config_options']:
+                try:
+                    self.config['auto_config_options']['password'] = self.config['password']
+                except Exception:
+                    pass
 
-        oplog_servers = self.config["oplog_servers"]
-        profiler_servers = self.config["profiler_servers"]
+            self.get_topology(self.config['auto_config_options'])
+            oplog_servers = self.build_oplog_servers(self.config['auto_config_options'])
+            profiler_servers = self.build_profiler_servers(self.config['auto_config_options'])
+        else:
+            oplog_servers = self.config["oplog_servers"]
+            profiler_servers = self.config["profiler_servers"]
 
         self.oplog_clients = {}
         for index, server in enumerate(oplog_servers):
@@ -152,8 +173,67 @@ class MongoQueryRecorder(object):
 
         utils.LOG.info("".join(msgs))
 
+    def get_topology(self, config_options):
+        topology = {}
+        mongos_conn = self.connect_mongo(config_options)
+        temp_topology = mongos_conn.admin.command("connPoolStats")
+        if 'replicaSets' in temp_topology:
+            for shard in temp_topology:
+                topology[shard] = {'primary': None, 'secondaries': []}
+            for host in temp_topology[shard]['hosts']:
+                if host['ismaster'] is True:
+                    topology[shard]['primary'] = host['addr']
+                else:
+                    topology[shard]['secondaries'].append(host['addr'])
+        else:
+            return False
+
+        self.topology = topology
+        return True
+
+    def build_oplog_servers(self, config_options):
+        oplog_servers = []
+        for shard in self.topology:
+            temp_server = {
+                'mongodb_uri': self.topology[shard]['primary'],
+                'replSet':  shard,
+                'auth_db':  config_options['auth_db'],
+                'user':     config_options['user'],
+                'password': config_options['password']
+            }
+            oplog_servers.append(temp_server)
+        return oplog_servers
+
+    def build_profiler_servers(self, config_options):
+        profiler_servers = []
+        for shard in self.topology:
+            temp_server = {
+                'mongodb_uri': self.topology[shard]['primary'],
+                'replSet':  shard,
+                'auth_db':  config_options['auth_db'],
+                'user':     config_options['user'],
+                'password': config_options['password']
+            }
+            profiler_servers.append(temp_server)
+            if self.config['auto_config'] is True:
+                if 'use_secondiaries' in self.config['auto_config_options']:
+                    if self.config['auto_config_options']['use_secondiaries'] is True:
+                        for node in self.topology[shard]['secondaries']:
+                            temp_server = {
+                                'mongodb_uri': self.topology[shard]['primary'],
+                                'auth_db':  config_options['auth_db'],
+                                'user':     config_options['user'],
+                                'password': config_options['password']
+                            }
+                            profiler_servers.append(temp_server)
+        return profiler_servers
+
     def connect_mongo(self, server_config):
-        client = MongoClient(server_config['mongodb_uri'], slaveOk=True)
+        if 'replSet' not in server_config:
+            client = MongoClient(server_config['mongodb_uri'], slaveOk=True)
+        else:
+            client = MongoClient(server_config['mongodb_uri'], slaveOk=True, replSet=server_config['replSet'])
+
         if server_config['auth_db'] is not None \
            and server_config['user'] is not None \
            and server_config['password'] is not None:
