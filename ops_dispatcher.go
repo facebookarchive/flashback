@@ -1,6 +1,7 @@
 package flashback
 
 import (
+	"fmt"
 	"time"
 )
 
@@ -43,11 +44,11 @@ func NewBestEffortOpsDispatcher(reader OpsReader, opsSize int, logger *Logger) c
 	return opChannel
 }
 
-func NewByTimeOpsDispatcher(reader OpsReader, opsSize int, logger *Logger) chan *Op {
+func NewByTimeOpsDispatcher(reader OpsReader, opsSize int, logger *Logger, speedup float64) chan *Op {
 	opChannel := make(chan *Op, 5000)
 	go func() {
-		logger.Info("Started replaying ops by time")
-		now_epoch := time.Now()
+		logger.Info(fmt.Sprintf("Started replaying ops by time with speedup of %f", speedup))
+		now_epoch := time.Unix(0, 0)
 		epoch := time.Unix(0, 0)
 		for i := 0; i < opsSize && !reader.AllLoaded(); i++ {
 			op := reader.Next()
@@ -56,12 +57,14 @@ func NewByTimeOpsDispatcher(reader OpsReader, opsSize int, logger *Logger) chan 
 			}
 			if epoch.Unix() == 0 {
 				epoch = op.Timestamp
+				now_epoch = time.Now()
 			}
 
 			elapsed := op.Timestamp.Sub(epoch)
-			currentClapsed := time.Now().Sub(now_epoch)
-			if elapsed > currentClapsed {
-				time.Sleep(elapsed - currentClapsed)
+			currentElapsed := time.Now().Sub(now_epoch)
+			currentElapsedScaled := time.Duration(float64(currentElapsed/time.Nanosecond) * speedup)
+			if elapsed > currentElapsedScaled {
+				time.Sleep(elapsed - currentElapsedScaled)
 			}
 			opChannel <- op
 			if reader.OpsRead()%10000 == 0 {

@@ -92,7 +92,7 @@ func (s *TestFileByLineOpsReaderSuite) TestPruneEmptyUpdateObj(c *C) {
 	testJsonString := `{"query": {"$or": [{"_acl": {"$exists": false}}, {"_acl.*.w": true}], "_id": "YDHJwP5hFX"}, "updateobj": {"$set": {"_updated_at": {"$date": 1396457119032}}, "$unset": {}}, "ns": "appdata66.app_0939ec2a-b247-4485-b741-bfe069791305:Prize", "op": "update", "ts": {"$date": 1396457119032}}
 		{"query": {"$or": [{"_acl": {"$exists": false}}, {"_acl.*.w": true}], "_id": "YDHJwP5hFX"}, "updateobj": {"$set": {"_updated_at": {"$date": 1396457119032}}, "$unset": {}}, "ns": "appdata66.app_0939ec2a-b247-4485-b741-bfe069791305:Prize", "op": "update", "ts": {"$date": 1396457119032}}`
 	reader := bytes.NewReader([]byte(testJsonString))
-	err, loader := NewByLineOpsReader(reader, logger)
+	err, loader := NewByLineOpsReader(reader, logger, "")
 	c.Assert(err, Equals, nil)
 
 	for op := loader.Next(); op != nil; op = loader.Next() {
@@ -117,21 +117,47 @@ func (s *TestFileByLineOpsReaderSuite) TestFileByLineOpsReader(c *C) {
         { "ts": {"$date": 1396456709424}, "ns": "db.coll", "op": "insert", "o": {"logType4": "warning", "message": "m4"} }
         { "ts": {"$date": 1396456709425}, "ns": "db.coll", "op": "insert", "o": {"logType5": "warning", "message": "m5"} }`
 	reader := bytes.NewReader([]byte(testJsonString))
-	err, loader := NewByLineOpsReader(reader, logger)
+	err, loader := NewByLineOpsReader(reader, logger, "")
 	c.Assert(err, Equals, nil)
 	CheckOpsReader(c, loader)
 
 	// Reset the reader so that we can test SkipOps
 	reader = bytes.NewReader([]byte(testJsonString))
-	err, loader = NewByLineOpsReader(reader, logger)
+	err, loader = NewByLineOpsReader(reader, logger, "")
 	c.Assert(err, Equals, nil)
 	CheckSkipOps(c, loader)
 
 	// Reset the reader so that we can test SetStartTime
 	reader = bytes.NewReader([]byte(testJsonString))
-	err, loader = NewByLineOpsReader(reader, logger)
+	err, loader = NewByLineOpsReader(reader, logger, "")
 	c.Assert(err, Equals, nil)
 	CheckSetStartTime(c, loader)
+}
+
+func (s *TestFileByLineOpsReaderSuite) TestOpFilter(c *C) {
+	logger, _ = NewLogger("", "")
+	fmt.Println("opfilter")
+
+	testJsonString :=
+		`{ "ts": {"$date" : 1396456709421}, "ns": "db.coll", "op": "insert", "o": {"logType1": "warning", "message": "m1"} }
+		 {"query": {"$or": [{"_acl": {"$exists": false}}, {"_acl.*.w": true}], "_id": "YDHJwP5hFX"}, "updateobj": {"$set": {"_updated_at": {"$date": 1396457119032}}, "$unset": {}}, "ns": "appdata66.app_0939ec2a-b247-4485-b741-bfe069791305:Prize", "op": "update", "ts": {"$date": 1396457119032}}
+		 {"ns": "lala.la", "command": {"query": {"_id": "IamId"}, "findAndModify": "app_2", "update": {"$set": {"_updated_at": {"$date": 1424226458004}}}}, "ts": {"$date": 1424226458010}, "op": "command"}`
+
+	test := func(opFilter string, expectedOps int) {
+		reader := bytes.NewReader([]byte(testJsonString))
+		err, loader := NewByLineOpsReader(reader, logger, opFilter)
+		c.Assert(err, Equals, nil)
+		opsRead := 0
+		for op := loader.Next(); op != nil; op = loader.Next() {
+			opsRead += 1
+		}
+		c.Assert(opsRead, Equals, expectedOps)
+	}
+
+	test("", 3)
+	test("update", 1)
+	test("update,insert", 2)
+	test("update,insert,command", 3)
 }
 
 func CheckTime(c *C, pythonTime float64, goTime time.Time) {

@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -21,21 +22,29 @@ func panicOnError(err error) {
 }
 
 var (
-	maxOps        int
-	numSkipOps    int
-	opsFilename   string
-	sampleRate    float64
-	socketTimeout int64
-	startTime     int64
-	style         string
-	url           string
-	verbose       bool
-	workers       int
-	stderr        string
-	stdout        string
-	logger        *flashback.Logger
-	statsFilename string
-	statsFile     *os.File
+	maxOps                   int
+	numSkipOps               int
+	opsFilename              string
+	slowOpThresholdMs        int
+	socketTimeout            int64
+	startTime                int64
+	style                    string
+	cyclic                   bool
+	url                      string
+	challengerUrl            string
+	challengerUrl2           string
+	challengerUrl3           string
+	verbose                  bool
+	workers                  int
+	stderr                   string
+	stdout                   string
+	logger                   *flashback.Logger
+	statsFilename            string
+	challengerStatsFilename  string
+	challengerStatsFilename2 string
+	challengerStatsFilename3 string
+	opFilter                 string
+	speedup                  float64
 )
 
 const (
@@ -52,12 +61,39 @@ func init() {
 		"url",
 		"",
 		"[Optional] The database server's url, in the format of <host>[:<port>]. Defaults to localhost:27017")
+	flag.StringVar(&challengerUrl,
+		"challenger_url",
+		"",
+		"[Optional] Url of the challenger, another mongo database configured with different parameters. "+
+			"Queries will be sent into both simultaneously Format: <host>[:<port>]. Not used by default. "+
+			"Supported by only \"real\" style")
+	flag.StringVar(&challengerUrl2,
+		"challenger_url2",
+		"",
+		"[Optional] Url of the challenger2, another mongo database configured with different parameters. "+
+			"Queries will be sent into both simultaneously Format: <host>[:<port>]. Not used by default. "+
+			"Supported by only \"real\" style")
+	flag.StringVar(&challengerUrl3,
+		"challenger_url3",
+		"",
+		"[Optional] Url of the challenger3, another mongo database configured with different parameters. "+
+			"Queries will be sent into both simultaneously Format: <host>[:<port>]. Not used by default. "+
+			"Supported by only \"real\" style")
 	flag.StringVar(&style,
 		"style",
 		"",
 		"How to replay the the ops. You can choose: \n"+
 			"	stress: replay ops as fast as possible\n"+
 			"	real: replay ops in accordance to ops' timestamps")
+	flag.Float64Var(&speedup,
+		"speedup",
+		1.0,
+		"This option is for \"real\" style. Instead of replaying ops realtime, you can use this option "+
+			"to speedup or slowdown execution. For example, setting speedup to 2 will send ops 2x faster")
+	flag.BoolVar(&cyclic,
+		"cyclic",
+		false,
+		"In \"real\" style, if true, we are going to cycle through the ops infinitely. If false, we will execute all the ops only once")
 	flag.IntVar(&workers,
 		"workers",
 		10,
@@ -77,10 +113,10 @@ func init() {
 		"socketTimeout",
 		defaultMgoSocketTimeout,
 		"[Optional] Mongo socket timeout in nanoseconds.")
-	flag.Float64Var(&sampleRate,
-		"sample_rate",
-		0.1,
-		"[Optional] Sample ops for latency, between (0.0, 1.0].")
+	flag.IntVar(&slowOpThresholdMs,
+		"slow_op_threshold_ms",
+		0,
+		"[Optional] All ops that take longer than slow_op_threshold_ms will be logged. Turned off by default.")
 	flag.BoolVar(&verbose,
 		"verbose",
 		false,
@@ -102,6 +138,22 @@ func init() {
 		"statsfilename",
 		"",
 		"[Optional] Provide a path to a file that will store the stats analyzer output at each interval.")
+	flag.StringVar(&challengerStatsFilename,
+		"challenger_statsfilename",
+		"",
+		"[Optional] Provide a path to a file that will store the stats analyzer output at each interval. (for challenger host)")
+	flag.StringVar(&challengerStatsFilename2,
+		"challenger_statsfilename2",
+		"",
+		"[Optional] Provide a path to a file that will store the stats analyzer output at each interval. (for challenger2 host)")
+	flag.StringVar(&challengerStatsFilename3,
+		"challenger_statsfilename3",
+		"",
+		"[Optional] Provide a path to a file that will store the stats analyzer output at each interval. (for challenger3 host)")
+	flag.StringVar(&opFilter,
+		"op_filter",
+		"",
+		"[Optional] If specified, we'll only execute ops of that particular type")
 }
 
 func parseFlags() error {
@@ -125,29 +177,6 @@ func parseFlags() error {
 	return nil
 }
 
-func retryOnSocketFailure(block func() error, session *mgo.Session) error {
-	err := block()
-	if err == nil {
-		return nil
-	}
-
-	switch err.(type) {
-	case *mgo.QueryError, *mgo.LastError:
-		return err
-	}
-
-	switch err {
-	case mgo.ErrNotFound, flashback.NotSupported:
-		return err
-	}
-
-	// Otherwise it's probably a socket error so we refresh the connection,
-	// and try again
-	session.Refresh()
-	logger.Error("retrying mongo query after error: ", err)
-	return block()
-}
-
 func makeOpsChan(style string, opsFilename string, logger *flashback.Logger) (chan *flashback.Op, error) {
 	// Prepare to dispatch ops
 	var (
@@ -155,31 +184,18 @@ func makeOpsChan(style string, opsFilename string, logger *flashback.Logger) (ch
 		err    error
 	)
 
-	if style == "stress" {
-		err, reader = flashback.NewFileByLineOpsReader(opsFilename, logger)
+	if style == "real" && cyclic == true {
+		reader = flashback.NewCyclicOpsReader(func() flashback.OpsReader {
+			err, reader := flashback.NewFileByLineOpsReader(opsFilename, logger, opFilter)
+			panicOnError(err)
+			return reader
+		}, logger)
+	} else {
+		err, reader = flashback.NewFileByLineOpsReader(opsFilename, logger, opFilter)
 		if err != nil {
 			return nil, err
 		}
-
-		if startTime > 0 {
-			if _, err = reader.SetStartTime(startTime); err != nil {
-				return nil, err
-			}
-		}
-		if numSkipOps > 0 {
-			if err := reader.SkipOps(numSkipOps); err != nil {
-				return nil, err
-			}
-		}
-		return flashback.NewBestEffortOpsDispatcher(reader, maxOps, logger), nil
 	}
-
-	// TODO NewCyclicOpsReader: do we really want to make it cyclic?
-	reader = flashback.NewCyclicOpsReader(func() flashback.OpsReader {
-		err, reader := flashback.NewFileByLineOpsReader(opsFilename, logger)
-		panicOnError(err)
-		return reader
-	}, logger)
 
 	if startTime > 0 {
 		if _, err := reader.SetStartTime(startTime); err != nil {
@@ -191,7 +207,26 @@ func makeOpsChan(style string, opsFilename string, logger *flashback.Logger) (ch
 			return nil, err
 		}
 	}
-	return flashback.NewByTimeOpsDispatcher(reader, maxOps, logger), nil
+
+	if style == "stress" {
+		return flashback.NewBestEffortOpsDispatcher(reader, maxOps, logger), nil
+	} else {
+		return flashback.NewByTimeOpsDispatcher(reader, maxOps, logger, speedup), nil
+	}
+}
+
+type node struct {
+	name          string
+	url           string
+	statsFile     *os.File
+	statsChan     chan flashback.OpStat
+	statsAnalyzer *flashback.StatsAnalyzer
+}
+
+type nodeWorkerState struct {
+	name    string
+	session *mgo.Session
+	exec    *flashback.OpsExecutor
 }
 
 func main() {
@@ -204,94 +239,155 @@ func main() {
 	opsChan, err := makeOpsChan(style, opsFilename, logger)
 	panicOnError(err)
 
-	if statsFilename != "" {
-		var err error
-		statsFile, err = os.Create(statsFilename)
-		panicOnError(err)
-		defer statsFile.Close()
+	createNode := func(name string, nodeUrl string, filename string) node {
+		var n node
+		// stats file
+		if filename != "" {
+			var err error
+			n.statsFile, err = os.Create(filename)
+			panicOnError(err)
+		} else {
+			n.statsFile = nil
+		}
+		n.name = name
+		n.url = nodeUrl
+		n.statsChan = make(chan flashback.OpStat, workers*100)
+		n.statsAnalyzer = flashback.NewStatsAnalyzer(n.statsChan)
+		return n
 	}
 
-	latencyChan := make(chan flashback.Latency, workers)
+	var nodes []node
+	// create "default" node
+	nodes = append(nodes, createNode("default", url, statsFilename))
+	// create "challenger" node if necessary
+	if challengerUrl != "" {
+		nodes = append(nodes, createNode("challenger", challengerUrl, challengerStatsFilename))
+	}
+	// create "challenger2" node if necessary
+	if challengerUrl2 != "" {
+		nodes = append(nodes, createNode("challenger2", challengerUrl2, challengerStatsFilename2))
+	}
+	// create "challenger3" node if necessary
+	if challengerUrl3 != "" {
+		nodes = append(nodes, createNode("challenger3", challengerUrl3, challengerStatsFilename3))
+	}
+
+	// close stats files
+	for _, n := range nodes {
+		if n.statsFile != nil {
+			defer n.statsFile.Close()
+		}
+	}
 
 	// Set up workers to do the job
 	exit := make(chan int)
 	opsExecuted := int64(0)
-	fetch := func(id int, statsCollector flashback.IStatsCollector) {
+	fetch := func(id int) {
 		logger.Infof("Worker #%d report for duty\n", id)
 
-		session, err := mgo.Dial(url)
-		panicOnError(err)
-		session.SetSocketTimeout(time.Duration(socketTimeout))
+		workerStates := make([]nodeWorkerState, len(nodes))
 
-		defer session.Close()
-		exec := flashback.OpsExecutorWithStats(session, statsCollector)
+		for i, n := range nodes {
+			session, err := mgo.Dial(n.url)
+			panicOnError(err)
+			session.SetSocketTimeout(time.Duration(socketTimeout))
+			defer session.Close()
+			workerStates[i] = nodeWorkerState{
+				n.name,
+				session,
+				flashback.NewOpsExecutor(session, n.statsChan, logger),
+			}
+		}
+
 		for {
 			op := <-opsChan
 			if op == nil {
 				break
 			}
-			block := func() error {
-				err := exec.Execute(op)
-				return err
+			op = flashback.CanonicalizeOp(op)
+			if op == nil {
+				continue
 			}
-			err := retryOnSocketFailure(block, session)
-			if verbose == true && err != nil {
-				logger.Error(fmt.Sprintf(
-					"error executing op - type:%s,database:%s,collection:%s,error:%s",
-					op.Type, op.Database, op.Collection, err))
+
+			var wg sync.WaitGroup
+			wg.Add(len(nodes))
+
+			execute := func(executor *flashback.OpsExecutor, name string) {
+				defer wg.Done()
+				err := executor.Execute(op)
+				if err != nil {
+					if verbose == true {
+						logger.Error(fmt.Sprintf(
+							"[%s] error executing op - type:%s,database:%s,collection:%s,error:%s", name,
+							op.Type, op.Database, op.Collection, err))
+					}
+				}
 			}
+
+			for _, ws := range workerStates {
+				go execute(ws.exec, ws.name)
+			}
+			wg.Wait()
+
+			if slowOpThresholdMs > 0 {
+				isSlow := func(latency time.Duration) bool {
+					return latency > time.Duration(slowOpThresholdMs)*time.Millisecond
+				}
+				wasAnyOpSlow := false
+				for _, ws := range workerStates {
+					if isSlow(ws.exec.LastLatency()) {
+						wasAnyOpSlow = true
+						break
+					}
+				}
+				if wasAnyOpSlow {
+					var timeOutput string
+					for _, ws := range workerStates {
+						timeOutput = fmt.Sprintf("%s %v (%s)", timeOutput, ws.exec.LastLatency(), ws.name)
+					}
+					logger.Infof(fmt.Sprintf("Slow op - %s\ntype:%s,database:%s,collection:%s\n\t%v",
+						timeOutput, op.Type, op.Database, op.Collection, op.Content))
+				}
+			}
+
 			atomic.AddInt64(&opsExecuted, 1)
 		}
 		exit <- 1
 		logger.Infof("Worker #%d done!\n", id)
 	}
-	statsCollectorList := make([]*flashback.StatsCollector, workers)
+
 	for i := 0; i < workers; i++ {
-		statsCollectorList[i] = flashback.NewStatsCollector()
-		statsCollectorList[i].SampleLatencies(sampleRate, latencyChan)
-		go fetch(i, statsCollectorList[i])
+		go fetch(i)
 	}
 
-	// Periodically report execution status
-	go func() {
-		statsAnalyzer := flashback.NewStatsAnalyzer(statsCollectorList, &opsExecuted,
-			latencyChan, int(sampleRate*float64(maxOps)))
-		toFloat := func(nano int64) float64 {
-			return float64(nano) / float64(1e6)
-		}
+	report := func() {
+		printStatus := func(status *flashback.ExecutionStatus, statsOut *os.File, name string) {
+			logger.Infof("[%s] Executed %d ops (%d in interval), got %d errors (%d in interval), "+
+				"%.2f ops/sec (total), %.2f ops/sec (interval)", name, status.OpsExecuted, status.IntervalOpsExecuted,
+				status.OpsErrors, status.IntervalOpsErrors, status.OpsPerSec, status.IntervalOpsPerSec)
 
-		report := func() {
 			var statsLineOutput string
-
-			status := statsAnalyzer.GetStatus()
-			logger.Infof("Executed %d ops, %.2f ops/sec (avg), %.2f ops/sec (last)", opsExecuted,
-				status.OpsPerSec, status.OpsPerSecLast)
-
-			if statsFilename != "" {
+			if statsOut != nil {
 				timestamp := time.Now().Format("2006-01-02 15:04:05 -0700")
-				statsLineOutput = fmt.Sprintf("%s,%d,%.2f", timestamp, (status.OpsExecuted - status.OpsExecutedLast), status.OpsPerSecLast)
+				statsLineOutput = fmt.Sprintf("%s,%d,%.2f", timestamp, status.IntervalOpsExecuted, status.IntervalOpsPerSec)
 			}
 
 			for _, opType := range flashback.AllOpTypes {
-				allTime := status.AllTimeLatencies[opType]
-				sinceLast := status.SinceLastLatencies[opType]
-				logger.Infof("  Op type: %s, count: %d, avg ops/sec: %.2f, last ops/sec: %.2f",
-					opType, status.Counts[opType],
-					status.TypeOpsSec[opType], status.TypeOpsSecLast[opType])
-				template := "   %s: P50: %.2fms, P70: %.2fms, P90: %.2fms, " +
-					"P95 %.2fms, P99 %.2fms, Max %.2fms\n"
-				logger.Infof(template, "Total", toFloat(allTime[flashback.P50]),
-					toFloat(allTime[flashback.P70]), toFloat(allTime[flashback.P90]),
-					toFloat(allTime[flashback.P95]), toFloat(allTime[flashback.P99]),
-					toFloat(allTime[flashback.P100]))
-				logger.Infof(template, "Last ", toFloat(sinceLast[flashback.P50]),
-					toFloat(sinceLast[flashback.P70]), toFloat(sinceLast[flashback.P90]),
-					toFloat(sinceLast[flashback.P95]), toFloat(sinceLast[flashback.P99]),
-					toFloat(sinceLast[flashback.P100]))
+				latencies := status.Latencies[opType]
+				intervalLatencies := status.IntervalLatencies[opType]
+				logger.Infof("  Op type: %s, count: %d, interval count %d, avg ops/sec: %.2f, interval ops/sec: %.2f",
+					opType, status.Counts[opType], status.IntervalCounts[opType],
+					status.TypeOpsSec[opType], status.IntervalTypeOpsSec[opType])
+				template := "   %s: P50: %.2fms, P70: %.2fms, P90: %.2fms, P95 %.2fms, P99 %.2fms, Max %.2fms\n"
+				logger.Infof(template, "Total", latencies[flashback.P50], latencies[flashback.P70], latencies[flashback.P90],
+					latencies[flashback.P95], latencies[flashback.P99], status.MaxLatency[opType])
+				logger.Infof(template, "Interval", intervalLatencies[flashback.P50], intervalLatencies[flashback.P70],
+					intervalLatencies[flashback.P90], intervalLatencies[flashback.P95], intervalLatencies[flashback.P99],
+					status.IntervalMaxLatency[opType])
 
-				if statsFilename != "" {
+				if statsOut != nil {
 					statsLineOutput = fmt.Sprintf("%s,%d,%.2f", statsLineOutput,
-						(status.Counts[opType] - status.CountsLast[opType]), status.TypeOpsSecLast[opType])
+						status.IntervalCounts[opType], status.IntervalTypeOpsSec[opType])
 				}
 			}
 
@@ -299,14 +395,20 @@ func main() {
 			// Format is:
 			// time,  ops, ops/sec, insert ops, inserts/sec, update ops, update/sec, remove ops, remove/sec,
 			// query ops, query/sec, count ops, count/sec, fam ops, fam/sec
-			if statsFilename != "" {
-				statsFile.WriteString(statsLineOutput + "\n")
+			if statsOut != nil {
+				statsOut.WriteString(statsLineOutput + "\n")
 			}
 		}
-		defer report()
 
-		for opsExecuted < int64(maxOps) {
-			time.Sleep(5 * time.Second)
+		for _, n := range nodes {
+			printStatus(n.statsAnalyzer.GetStatus(), n.statsFile, n.name)
+		}
+	}
+
+	reportTicker := time.NewTicker(5 * time.Second)
+	// Periodically report execution status
+	go func() {
+		for range reportTicker.C {
 			report()
 		}
 	}()
@@ -317,4 +419,7 @@ func main() {
 		<-exit
 		received += 1
 	}
+	reportTicker.Stop()
+	// report one last time
+	report()
 }
