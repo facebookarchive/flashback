@@ -6,7 +6,6 @@ from datetime import datetime
 from pymongo import MongoClient, uri_parser
 import pymongo
 from threading import Thread
-import pprint
 import config
 import cPickle
 import Queue
@@ -185,7 +184,6 @@ class MongoQueryRecorder(object):
         if 'replicaSets' in temp_topology:
             for shard in temp_topology['replicaSets']:
                 topology[shard] = {'primary': None, 'secondaries': []}
-                pprint.pprint(temp_topology['replicaSets'][shard])
                 for host in temp_topology['replicaSets'][shard]['hosts']:
                     if host['ismaster'] is True:
                         topology[shard]['primary'] = host['addr']
