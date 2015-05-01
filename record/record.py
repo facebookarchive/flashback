@@ -6,6 +6,7 @@ from datetime import datetime
 from pymongo import MongoClient, uri_parser
 import pymongo
 from threading import Thread
+import pprint
 import config
 import cPickle
 import Queue
@@ -136,7 +137,7 @@ class MongoQueryRecorder(object):
             self.profiler_clients[server_string] = self.connect_mongo(server)
             utils.LOG.info("profiling server %d: %s", index, self.sanatize_server(server))
 
-    def sanatzie_server(server_config):
+    def sanatize_server(self, server_config):
         if 'user' in server_config:
             server_config['user'] = "Redacted"
         if 'password' in server_config:
@@ -182,13 +183,14 @@ class MongoQueryRecorder(object):
         mongos_conn = self.connect_mongo(config_options)
         temp_topology = mongos_conn.admin.command("connPoolStats")
         if 'replicaSets' in temp_topology:
-            for shard in temp_topology:
+            for shard in temp_topology['replicaSets']:
                 topology[shard] = {'primary': None, 'secondaries': []}
-            for host in temp_topology[shard]['hosts']:
-                if host['ismaster'] is True:
-                    topology[shard]['primary'] = host['addr']
-                else:
-                    topology[shard]['secondaries'].append(host['addr'])
+                pprint.pprint(temp_topology['replicaSets'][shard])
+                for host in temp_topology['replicaSets'][shard]['hosts']:
+                    if host['ismaster'] is True:
+                        topology[shard]['primary'] = host['addr']
+                    elif host['secondary'] is True:
+                        topology[shard]['secondaries'].append(host['addr'])
         else:
             return False
 
@@ -199,7 +201,7 @@ class MongoQueryRecorder(object):
         oplog_servers = []
         for shard in self.topology:
             temp_server = {
-                'mongodb_uri': self.topology[shard]['primary'],
+                'mongodb_uri': "mongodb://%s" % self.topology[shard]['primary'],
                 'replSet':  shard,
                 'auth_db':  config_options['auth_db'],
                 'user':     config_options['user'],
@@ -212,7 +214,7 @@ class MongoQueryRecorder(object):
         profiler_servers = []
         for shard in self.topology:
             temp_server = {
-                'mongodb_uri': self.topology[shard]['primary'],
+                'mongodb_uri': "mongodb://%s" % self.topology[shard]['primary'],
                 'replSet':  shard,
                 'auth_db':  config_options['auth_db'],
                 'user':     config_options['user'],
@@ -220,11 +222,11 @@ class MongoQueryRecorder(object):
             }
             profiler_servers.append(temp_server)
             if self.config['auto_config'] is True:
-                if 'use_secondiaries' in self.config['auto_config_options']:
-                    if self.config['auto_config_options']['use_secondiaries'] is True:
+                if 'use_secondaries' in self.config['auto_config_options']:
+                    if self.config['auto_config_options']['use_secondaries'] is True:
                         for node in self.topology[shard]['secondaries']:
                             temp_server = {
-                                'mongodb_uri': node,
+                                'mongodb_uri': "mongodb://%s" % node,
                                 'auth_db':  config_options['auth_db'],
                                 'user':     config_options['user'],
                                 'password': config_options['password']
@@ -236,7 +238,7 @@ class MongoQueryRecorder(object):
         if 'replSet' not in server_config:
             client = MongoClient(server_config['mongodb_uri'], slaveOk=True)
         else:
-            client = MongoClient(server_config['mongodb_uri'], slaveOk=True, replSet=server_config['replSet'])
+            client = MongoClient(server_config['mongodb_uri'], slaveOk=True, replicaset=server_config['replSet'])
 
         if server_config['auth_db'] is not None \
            and server_config['user'] is not None \
