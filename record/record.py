@@ -4,6 +4,7 @@ r""" Track the MongoDB activities by tailing oplog and profiler output"""
 from bson.timestamp import Timestamp
 from datetime import datetime
 from pymongo import MongoClient, uri_parser
+import pymongo
 from threading import Thread
 import config
 import cPickle
@@ -12,6 +13,7 @@ import time
 import utils
 import signal
 import merge
+import sys
 
 
 def tail_to_queue(tailer, identifier, doc_queue, state, end_time,
@@ -25,6 +27,7 @@ def tail_to_queue(tailer, identifier, doc_queue, state, end_time,
         it will sleep for a period of time and then try again.
     """
     tailer_state = state.tailer_states[identifier]
+    preformed_loops = 0
     while tailer.alive and all(s.alive for s in state.tailer_states.values()):
         try:
             doc = tailer.next()
@@ -42,6 +45,13 @@ def tail_to_queue(tailer, identifier, doc_queue, state, end_time,
                 break
             tailer_state.last_get_none_ts = datetime.now()
             time.sleep(check_duration_secs)
+        except pymongo.errors.OperationFailure, e:
+            if preformed_loops == 0:
+                utils.LOG.error(
+                    "BADRUN: source %s: We appear to not have the %s collection created or is non-capped! %s",
+                    identifier, tailer.collection, e)
+        preformed_loops += 1
+
     tailer_state.alive = False
     utils.LOG.info("source %s: Tailing to queue completed!", identifier)
 
@@ -68,7 +78,6 @@ class MongoQueryRecorder(object):
 
         def __init__(self, tailer_names):
             self.timeout = False
-            
             self.tailer_states = {}
             for name in tailer_names:
                 self.tailer_states[name] = self.make_tailer_state()
@@ -80,12 +89,43 @@ class MongoQueryRecorder(object):
         if self.config["target_collections"] is not None:
             self.config["target_collections"] = set(
                 [coll.strip() for coll in self.config["target_collections"]])
+        if 'auto_config' in self.config and self.config['auto_config'] is True:
+            if 'auth_db' not in self.config['auto_config_options']:
+                try:
+                    self.config['auto_config_options']['auth_db'] = self.config['auth_db']
+                except Exception:
+                    pass
+            if 'user' not in self.config['auto_config_options']:
+                try:
+                    self.config['auto_config_options']['user'] = self.config['user']
+                except Exception:
+                    pass
+            if 'password' not in self.config['auto_config_options']:
+                try:
+                    self.config['auto_config_options']['password'] = self.config['password']
+                except Exception:
+                    pass
 
-        oplog_server = self.config["oplog_server"]
-        profiler_servers = self.config["profiler_servers"]
+            self.get_topology(self.config['auto_config_options'])
+            oplog_servers = self.build_oplog_servers(self.config['auto_config_options'])
+            profiler_servers = self.build_profiler_servers(self.config['auto_config_options'])
+        else:
+            oplog_servers = self.config["oplog_servers"]
+            profiler_servers = self.config["profiler_servers"]
 
-        mongodb_uri = oplog_server["mongodb_uri"]
-        self.oplog_client = MongoClient(mongodb_uri)
+        if len(oplog_servers) < 1 or len(profiler_servers) < 1:
+            utils.log.error("Detected either no profile or oplog servers, bailing")
+            sys.exit(1)
+
+        self.oplog_clients = {}
+        for index, server in enumerate(oplog_servers):
+            mongodb_uri = server['mongodb_uri']
+            nodelist = uri_parser.parse_uri(mongodb_uri)["nodelist"]
+            server_string = "%s:%s" % (nodelist[0][0], nodelist[0][1])
+
+            self.oplog_clients[server_string] = self.connect_mongo(server)
+            utils.LOG.info("oplog server %d: %s", index, self.sanatize_server(server))
+
         # create a mongo client for each profiler server
         self.profiler_clients = {}
         for index, server in enumerate(profiler_servers):
@@ -93,11 +133,16 @@ class MongoQueryRecorder(object):
             nodelist = uri_parser.parse_uri(mongodb_uri)["nodelist"]
             server_string = "%s:%s" % (nodelist[0][0], nodelist[0][1])
 
-            self.profiler_clients[server_string] = MongoClient(mongodb_uri,
-                                                               slaveOk=True)
-            utils.LOG.info("profiling server %d: %s", index, str(server))
-            
-        utils.LOG.info("oplog server: %s", str(oplog_server))
+            self.profiler_clients[server_string] = self.connect_mongo(server)
+            utils.LOG.info("profiling server %d: %s", index, self.sanatize_server(server))
+
+    def sanatize_server(self, server_config):
+        if 'user' in server_config:
+            server_config['user'] = "Redacted"
+        if 'password' in server_config:
+            server_config['password'] = "Redacted"
+        print(server_config)
+        return server_config
 
     @staticmethod
     def _process_doc_queue(doc_queue, files, state):
@@ -132,6 +177,79 @@ class MongoQueryRecorder(object):
 
         utils.LOG.info("".join(msgs))
 
+    def get_topology(self, config_options):
+        topology = {}
+        mongos_conn = self.connect_mongo(config_options)
+        temp_topology = mongos_conn.admin.command("connPoolStats")
+        if 'replicaSets' in temp_topology:
+            for shard in temp_topology['replicaSets']:
+                topology[shard] = {'primary': None, 'secondaries': []}
+                for host in temp_topology['replicaSets'][shard]['hosts']:
+                    if host['ismaster'] is True:
+                        topology[shard]['primary'] = host['addr']
+                    elif host['secondary'] is True:
+                        topology[shard]['secondaries'].append(host['addr'])
+        else:
+            return False
+
+        self.topology = topology
+        return True
+
+    def build_oplog_servers(self, config_options):
+        oplog_servers = []
+        for shard in self.topology:
+            temp_server = {
+                'mongodb_uri': "mongodb://%s" % self.topology[shard]['primary'],
+                'replSet':  shard,
+                'auth_db':  config_options['auth_db'],
+                'user':     config_options['user'],
+                'password': config_options['password']
+            }
+            oplog_servers.append(temp_server)
+        return oplog_servers
+
+    def build_profiler_servers(self, config_options):
+        profiler_servers = []
+        for shard in self.topology:
+            temp_server = {
+                'mongodb_uri': "mongodb://%s" % self.topology[shard]['primary'],
+                'replSet':  shard,
+                'auth_db':  config_options['auth_db'],
+                'user':     config_options['user'],
+                'password': config_options['password']
+            }
+            profiler_servers.append(temp_server)
+            if self.config['auto_config'] is True:
+                if 'use_secondaries' in self.config['auto_config_options']:
+                    if self.config['auto_config_options']['use_secondaries'] is True:
+                        for node in self.topology[shard]['secondaries']:
+                            temp_server = {
+                                'mongodb_uri': "mongodb://%s" % node,
+                                'auth_db':  config_options['auth_db'],
+                                'user':     config_options['user'],
+                                'password': config_options['password']
+                            }
+                            profiler_servers.append(temp_server)
+        return profiler_servers
+
+    def connect_mongo(self, server_config):
+        if 'replSet' not in server_config:
+            client = MongoClient(server_config['mongodb_uri'], slaveOk=True)
+        else:
+            client = MongoClient(server_config['mongodb_uri'], slaveOk=True, replicaset=server_config['replSet'])
+
+        if server_config['auth_db'] is not None \
+           and server_config['user'] is not None \
+           and server_config['password'] is not None:
+                try:
+                    client[server_config['auth_db']].authenticate(
+                        server_config['user'], server_config['password'])
+                except Exception, e:
+                    utils.log.error("Unable to authenticated to %s: %s " %
+                                    (server_config['mongodb_uri'], e))
+                    sys.exit(1)
+        return client
+
     def force_quit_all(self):
         """Gracefully quite all recording activities"""
         self.force_quit = True
@@ -152,32 +270,33 @@ class MongoQueryRecorder(object):
                 target=MongoQueryRecorder._process_doc_queue,
                 args=(doc_queue, files, state))
         })
-        tailer = utils.get_oplog_tailer(self.oplog_client,
-                                        # we are only interested in "insert"
-                                        ["i"],
-                                        self.config["target_databases"],
-                                        self.config["target_collections"],
-                                        Timestamp(start_utc_secs, 0))
-        oplog_cursor_id = tailer.cursor_id
-        workers_info.append({
-            "name": "tailing-oplogs",
-            "on_close":
-            lambda: self.oplog_client.kill_cursors([oplog_cursor_id]),
-            "thread": Thread(
-                target=tail_to_queue,
-                args=(tailer, "oplog", doc_queue, state,
-                      Timestamp(end_utc_secs, 0)))
-        })
+        for profiler_name, client in self.oplog_clients.items():
+            # create a profile collection tailer for each db
+            tailer = utils.get_oplog_tailer(client, ["i"],
+                                            self.config["target_databases"],
+                                            self.config["target_collections"],
+                                            Timestamp(start_utc_secs, 0))
+            oplog_cursor_id = tailer.cursor_id
+            workers_info.append({
+                "name": "tailing-oplogs on %s" % (profiler_name),
+                "on_close":
+                lambda: self.oplog_client.kill_cursors([oplog_cursor_id]),
+                "thread": Thread(
+                    target=tail_to_queue,
+                    args=(tailer, "oplog", doc_queue, state,
+                          Timestamp(end_utc_secs, 0)))
+            })
 
         start_datetime = datetime.utcfromtimestamp(start_utc_secs)
         end_datetime = datetime.utcfromtimestamp(end_utc_secs)
-        for profiler_name,client in self.profiler_clients.items():
+        for profiler_name, client in self.profiler_clients.items():
             # create a profile collection tailer for each db
             for db in self.config["target_databases"]:
                 tailer = utils.get_profiler_tailer(client,
-                                           db,
-                                           self.config["target_collections"],
-                                           start_datetime)
+                                                   db,
+                                                   self.config["target_collections"],
+                                                   start_datetime
+                                                   )
                 tailer_id = "%s_%s" % (db, profiler_name)
                 profiler_cursor_id = tailer.cursor_id
                 workers_info.append({
@@ -241,11 +360,9 @@ class MongoQueryRecorder(object):
                 tailer_name = "%s_%s" % (db, client_name)
                 tailer_names.append(tailer_name)
                 profiler_output_files.append(tailer_name)
-                files[tailer_name]= open(tailer_name, "wb")
-                
+                files[tailer_name] = open(tailer_name, "wb")
         tailer_names.append("oplog")
         state = MongoQueryRecorder. RecordingState(tailer_names)
-        
         # Create a series working threads to handle to track/dump mongodb
         # activities. On return, these threads have already started.
         workers_info = self._generate_workers(files, state, start_utc_secs,
@@ -272,6 +389,7 @@ class MongoQueryRecorder(object):
             oplog_output_file=self.config["oplog_output_file"],
             profiler_output_files=profiler_output_files,
             output_file=self.config["output_file"])
+
 
 def main():
     """Recording the inbound traffic for a database."""
