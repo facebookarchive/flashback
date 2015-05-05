@@ -238,9 +238,9 @@ class MongoQueryRecorder(object):
         else:
             client = MongoClient(server_config['mongodb_uri'], slaveOk=True, replicaset=server_config['replSet'])
 
-        if server_config['auth_db'] is not None \
-           and server_config['user'] is not None \
-           and server_config['password'] is not None:
+        if server_config.get('auth_db') is not None \
+           and server_config.get('user') is not None \
+           and server_config.get('password') is not None:
                 try:
                     client[server_config['auth_db']].authenticate(
                         server_config['user'], server_config['password'])
