@@ -25,7 +25,9 @@ var (
 
 // Converts the raw BSON doc in op.Query to extended JSON
 func rawBSONToJSON(rawBSON []byte) (interface{}, error) {
-	var data interface{}
+	// Use bson.D to preserve order when unmarshalling
+	// http://godoc.org/github.com/mongodb/mongo-tools/common/bsonutil#MarshalD
+	var data bson.D
 	if err := bson.Unmarshal(rawBSON, &data); err != nil {
 		return nil, err
 	}
