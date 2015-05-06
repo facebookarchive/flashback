@@ -2,7 +2,6 @@ package flashback
 
 import (
 	"bufio"
-	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -10,6 +9,7 @@ import (
 	"time"
 
 	"github.com/mongodb/mongo-tools/common/bsonutil" // requires go 1.4
+	"github.com/mongodb/mongo-tools/common/json"
 )
 
 // OpsReader Reads the ops from a source and present a interface for consumers

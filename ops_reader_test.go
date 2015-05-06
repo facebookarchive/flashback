@@ -107,6 +107,21 @@ func (s *TestFileByLineOpsReaderSuite) TestPruneEmptyUpdateObj(c *C) {
 	}
 }
 
+func (s *TestFileByLineOpsReaderSuite) TestExtendedJSONParsing(c *C) {
+	testJsonString := `{"ns":"foo.bar","ntoreturn":-1,"ntoskip":0,"op":"query","query":{"a":"a1"},"ts":{"$date":"1970-01-17T13:27:30.409Z"}}
+	{"command":{"ping":NumberInt(1),"timeout":NumberInt(1000000)},"ns":"admin.$cmd","ntoreturn":-1,"ntoskip":0,"op":"command","ts":{"$date":"1970-01-17T13:27:30.409Z"}}
+	{"ns":"foo.bar","ntoreturn":100,"ntoskip":0,"op":"query","query":{"$maxScan":NumberInt(500000),"$query":{"a":"a1","b":{"$in":[null,"b1","b2"]}}},"ts":{"$date":"1970-01-17T13:27:30.409Z"}}
+	`
+	reader := bytes.NewReader([]byte(testJsonString))
+	err, loader := NewByLineOpsReader(reader, logger, "")
+	c.Assert(err, Equals, nil)
+
+	for op := loader.Next(); op != nil; op = loader.Next() {
+	}
+
+	c.Assert(loader.OpsRead(), Equals, 3)
+}
+
 func (s *TestFileByLineOpsReaderSuite) TestFileByLineOpsReader(c *C) {
 	logger, _ = NewLogger("", "")
 

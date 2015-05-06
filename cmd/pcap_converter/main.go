@@ -59,7 +59,7 @@ func main() {
 				fbOp["ns"] = opQuery.FullCollectionName
 				fbOp["ntoskip"] = opQuery.NumberToSkip
 				fbOp["ntoreturn"] = opQuery.NumberToReturn
-				fbOp["ts"] = fmt.Sprintf("%d", op.Seen.Unix())
+				fbOp["ts"] = json.Date(op.Seen.Unix())
 				query, err := rawBSONToJSON(opQuery.Query)
 				if err != nil {
 					logger.Println(err)
