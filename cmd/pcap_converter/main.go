@@ -2,7 +2,6 @@
 package main
 
 import (
-	//	stdjson "encoding/json"
 	"flag"
 	"fmt"
 	"log"

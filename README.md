@@ -80,3 +80,17 @@ Required options:
 For a full list of options:
 
     flashback --help
+
+## Misc
+
+### pcap_converter
+
+pcap_converter is an experimental way to build a recorded ops file from a pcap of mongo traffic.
+
+```sh
+$ go get github.com/ParsePlatform/flashback/cmd/pcap_converter
+$ tcpdump -i lo0 -w some_mongo_cap.pcap 'dst port 27017'
+$ pcap_converter -f some_mongo_cap.pcap > ops_filename.json
+```
+
+
