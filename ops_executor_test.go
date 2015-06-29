@@ -111,3 +111,10 @@ func (s *TestExecutorSuite) TestExecution(c *C) {
 	findResult = exec.lastResult.(*[]Document)
 	c.Assert(len(*findResult), Equals, 0)
 }
+
+func (s *TestExecutorSuite) TestSafeGetInt(c *C) {
+	c.Assert(safeGetInt(int32(11)), Equals, int(11))
+	c.Assert(safeGetInt(int64(11)), Equals, int(11))
+	c.Assert(safeGetInt(float32(11.1)), Equals, int(11))
+	c.Assert(safeGetInt(float64(11.1)), Equals, int(11))
+}

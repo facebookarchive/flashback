@@ -47,11 +47,11 @@ func (e *OpsExecutor) execQuery(
 	query := coll.Find(content["query"])
 	result := []Document{}
 	if content["ntoreturn"] != nil {
-		ntoreturn := int(content["ntoreturn"].(float64))
+		ntoreturn := safeGetInt(content["ntoreturn"])
 		query.Limit(ntoreturn)
 	}
 	if content["ntoskip"] != nil {
-		ntoskip := int(content["ntoskip"].(float64))
+		ntoskip := safeGetInt(content["ntoskip"])
 		query.Skip(ntoskip)
 	}
 	err := query.All(&result)
@@ -162,4 +162,19 @@ func (e *OpsExecutor) Execute(op *Op) error {
 
 func (e *OpsExecutor) LastLatency() time.Duration {
 	return e.lastLatency
+}
+
+func safeGetInt(i interface{}) int {
+	switch i.(type) {
+	case int32:
+		return int(i.(int32))
+	case int64:
+		return int(i.(int64))
+	case float32:
+		return int(i.(float32))
+	case float64:
+		return int(i.(float64))
+	default:
+		return int(0)
+	}
 }
