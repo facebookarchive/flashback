@@ -113,8 +113,18 @@ func (s *TestExecutorSuite) TestExecution(c *C) {
 }
 
 func (s *TestExecutorSuite) TestSafeGetInt(c *C) {
-	c.Assert(safeGetInt(int32(11)), Equals, int(11))
-	c.Assert(safeGetInt(int64(11)), Equals, int(11))
-	c.Assert(safeGetInt(float32(11.1)), Equals, int(11))
-	c.Assert(safeGetInt(float64(11.1)), Equals, int(11))
+	val, err := safeGetInt(int32(11))
+	c.Assert(err, IsNil)
+	c.Assert(val, Equals, int(11))
+	val, err = safeGetInt(int64(11))
+	c.Assert(err, IsNil)
+	c.Assert(val, Equals, int(11))
+	val, err = safeGetInt(float32(11))
+	c.Assert(err, IsNil)
+	c.Assert(val, Equals, int(11))
+	val, err = safeGetInt(float64(11))
+	c.Assert(err, IsNil)
+	c.Assert(val, Equals, int(11))
+	val, err = safeGetInt("a")
+	c.Assert(err, NotNil)
 }

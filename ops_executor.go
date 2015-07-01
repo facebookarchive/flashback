@@ -2,6 +2,7 @@ package flashback
 
 import (
 	"errors"
+	"fmt"
 	"gopkg.in/mgo.v2"
 	"time"
 )
@@ -47,12 +48,18 @@ func (e *OpsExecutor) execQuery(
 	query := coll.Find(content["query"])
 	result := []Document{}
 	if content["ntoreturn"] != nil {
-		ntoreturn := safeGetInt(content["ntoreturn"])
-		query.Limit(ntoreturn)
+		if ntoreturn, err := safeGetInt(content["ntoreturn"]); err != nil {
+			e.logger.Error("could not set ntoreturn: ", err)
+		} else {
+			query.Limit(ntoreturn)
+		}
 	}
 	if content["ntoskip"] != nil {
-		ntoskip := safeGetInt(content["ntoskip"])
-		query.Skip(ntoskip)
+		if ntoskip, err := safeGetInt(content["ntoskip"]); err != nil {
+			e.logger.Error("could not set ntoskip: ", err)
+		} else {
+			query.Skip(ntoskip)
+		}
 	}
 	err := query.All(&result)
 	e.lastResult = &result
@@ -164,17 +171,17 @@ func (e *OpsExecutor) LastLatency() time.Duration {
 	return e.lastLatency
 }
 
-func safeGetInt(i interface{}) int {
+func safeGetInt(i interface{}) (int, error) {
 	switch i.(type) {
 	case int32:
-		return int(i.(int32))
+		return int(i.(int32)), nil
 	case int64:
-		return int(i.(int64))
+		return int(i.(int64)), nil
 	case float32:
-		return int(i.(float32))
+		return int(i.(float32)), nil
 	case float64:
-		return int(i.(float64))
+		return int(i.(float64)), nil
 	default:
-		return int(0)
+		return int(0), fmt.Errorf("unsupported type for %i", i)
 	}
 }
