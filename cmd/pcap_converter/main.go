@@ -9,7 +9,7 @@ import (
 	"runtime"
 	"strings"
 
-	"code.google.com/p/gopacket/pcap"
+	"github.com/google/gopacket/pcap"
 	"github.com/mongodb/mongo-tools/common/bsonutil"
 	"github.com/mongodb/mongo-tools/common/json"
 	"github.com/tmc/mongocaputils"
