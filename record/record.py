@@ -18,8 +18,9 @@ import sys
 
 def tail_to_queue(tailer, identifier, doc_queue, state, end_time,
                   check_duration_secs=1):
-    """Accepts a tailing cursor and serialize the retrieved documents to a
-    fifo queue
+    """
+    Accept a tailing cursor and serialize the retrieved documents to a fifo
+    queue.
     @param identifier: when passing the retrieved document to the queue, we
         will attach a unique identifier that allows the queue consumers to
         process different sources of documents accordingly.
@@ -57,12 +58,10 @@ def tail_to_queue(tailer, identifier, doc_queue, state, end_time,
 
 
 class MongoQueryRecorder(object):
-
     """Record MongoDB database's activities by polling the oplog and profiler
     results"""
 
     class RecordingState(object):
-
         """Keeps the running status of a recording request"""
 
         @staticmethod
@@ -70,7 +69,7 @@ class MongoQueryRecorder(object):
             """Return the tailer state "struct" """
             s = utils.EmptyClass()
             s.entries_received = 0
-            s. entries_written = 0
+            s.entries_written = 0
             s.alive = True
             s.last_received_ts = None
             s.last_get_none_ts = None
@@ -85,26 +84,19 @@ class MongoQueryRecorder(object):
     def __init__(self, db_config):
         self.config = db_config
         self.force_quit = False
-        # sanitize the options
-        if self.config["target_collections"] is not None:
-            self.config["target_collections"] = set(
-                [coll.strip() for coll in self.config["target_collections"]])
-        if 'auto_config' in self.config and self.config['auto_config'] is True:
-            if 'auth_db' not in self.config['auto_config_options']:
-                try:
-                    self.config['auto_config_options']['auth_db'] = self.config['auth_db']
-                except Exception:
-                    pass
-            if 'user' not in self.config['auto_config_options']:
-                try:
-                    self.config['auto_config_options']['user'] = self.config['user']
-                except Exception:
-                    pass
-            if 'password' not in self.config['auto_config_options']:
-                try:
-                    self.config['auto_config_options']['password'] = self.config['password']
-                except Exception:
-                    pass
+
+        # Sanitize the config options
+        self.config["target_collections"] = set(
+            [coll.strip() for coll in self.config.get("target_collections", [])])
+        if self.config.get('auto_config'):
+            if 'auto_config_options' not in self.config:
+                self.config['auto_config_options'] = {}
+            if 'auth_db' not in self.config['auto_config_options'] and 'auth_db' in self.config:
+                self.config['auto_config_options']['auth_db'] = self.config['auth_db']
+            if 'user' not in self.config['auto_config_options'] and 'user' in self.config:
+                self.config['auto_config_options']['user'] = self.config['user']
+            if 'password' not in self.config['auto_config_options'] and 'password' in self.config:
+                self.config['auto_config_options']['password'] = self.config['password']
 
             self.get_topology(self.config['auto_config_options'])
             oplog_servers = self.build_oplog_servers(self.config['auto_config_options'])
@@ -126,7 +118,7 @@ class MongoQueryRecorder(object):
             self.oplog_clients[server_string] = self.connect_mongo(server)
             utils.LOG.info("oplog server %d: %s", index, self.sanatize_server(server))
 
-        # create a mongo client for each profiler server
+        # Create a mongo client for each profiler server
         self.profiler_clients = {}
         for index, server in enumerate(profiler_servers):
             mongodb_uri = server['mongodb_uri']
@@ -233,6 +225,7 @@ class MongoQueryRecorder(object):
         return profiler_servers
 
     def connect_mongo(self, server_config):
+        """Connect to MongoDB and return an initialized MongoClient"""
         if 'replSet' not in server_config:
             client = MongoClient(server_config['mongodb_uri'], slaveOk=True)
         else:
@@ -251,12 +244,13 @@ class MongoQueryRecorder(object):
         return client
 
     def force_quit_all(self):
-        """Gracefully quite all recording activities"""
+        """Gracefully quit all recording activities"""
         self.force_quit = True
 
     def _generate_workers(self, files, state, start_utc_secs, end_utc_secs):
-        """Generate the threads that tails the data sources and put the fetched
+        """Generate the threads that tail the data sources and put the fetched
         entries to the files"""
+
         # Create working threads to handle to track/dump mongodb activities
         workers_info = []
         doc_queue = Queue.Queue()
@@ -270,39 +264,39 @@ class MongoQueryRecorder(object):
                 target=MongoQueryRecorder._process_doc_queue,
                 args=(doc_queue, files, state))
         })
+
+        # Create an oplog collection tailer for each db
         for profiler_name, client in self.oplog_clients.items():
-            # create a profile collection tailer for each db
             tailer = utils.get_oplog_tailer(client, ["i"],
                                             self.config["target_databases"],
                                             self.config["target_collections"],
                                             Timestamp(start_utc_secs, 0))
             oplog_cursor_id = tailer.cursor_id
             workers_info.append({
-                "name": "tailing-oplogs on %s" % (profiler_name),
+                "name": "tailing-oplogs on %s" % profiler_name,
                 "on_close":
-                lambda: self.oplog_client.kill_cursors([oplog_cursor_id]),
+                    lambda: self.oplog_client.kill_cursors([oplog_cursor_id]),
                 "thread": Thread(
                     target=tail_to_queue,
                     args=(tailer, "oplog", doc_queue, state,
                           Timestamp(end_utc_secs, 0)))
             })
 
+        # Create a profile collection tailer for each db
         start_datetime = datetime.utcfromtimestamp(start_utc_secs)
         end_datetime = datetime.utcfromtimestamp(end_utc_secs)
         for profiler_name, client in self.profiler_clients.items():
-            # create a profile collection tailer for each db
             for db in self.config["target_databases"]:
                 tailer = utils.get_profiler_tailer(client,
                                                    db,
                                                    self.config["target_collections"],
-                                                   start_datetime
-                                                   )
+                                                   start_datetime)
                 tailer_id = "%s_%s" % (db, profiler_name)
                 profiler_cursor_id = tailer.cursor_id
                 workers_info.append({
                     "name": "tailing-profiler for %s on %s" % (db, profiler_name),
                     "on_close":
-                    lambda: self.profiler_client.kill_cursors([profiler_cursor_id]),
+                        lambda: self.profiler_client.kill_cursors([profiler_cursor_id]),
                     "thread": Thread(
                         target=tail_to_queue,
                         args=(tailer, tailer_id, doc_queue, state,
@@ -317,7 +311,7 @@ class MongoQueryRecorder(object):
         return workers_info
 
     def _join_workers(self, state, workers_info):
-        """Ready to exit all workers"""
+        """Prepare to exit all workers"""
         for idx, worker_info in enumerate(workers_info):
             utils.LOG.info(
                 "Time to stop, waiting for thread: %s to finish",
@@ -344,16 +338,18 @@ class MongoQueryRecorder(object):
         return MongoQueryRecorder._report_status(state)
 
     def record(self):
-        """record the activities in the multithreading way"""
+        """Record the activities in the multithreading way"""
         start_utc_secs = utils.now_in_utc_secs()
         end_utc_secs = utils.now_in_utc_secs() + self.config["duration_secs"]
+
         # We'll dump the recorded activities to `files`.
         files = {
             "oplog": open(self.config["oplog_output_file"], "wb")
         }
         tailer_names = []
         profiler_output_files = []
-        # open a file for each profiler client, append client name as suffix
+
+        # Open a file for each profiler client, append client name as suffix
         for client_name in self.profiler_clients:
             # create a file for each (client,db)
             for db in self.config["target_databases"]:
@@ -362,9 +358,12 @@ class MongoQueryRecorder(object):
                 profiler_output_files.append(tailer_name)
                 files[tailer_name] = open(tailer_name, "wb")
         tailer_names.append("oplog")
-        state = MongoQueryRecorder. RecordingState(tailer_names)
-        # Create a series working threads to handle to track/dump mongodb
-        # activities. On return, these threads have already started.
+
+        state = MongoQueryRecorder.RecordingState(tailer_names)
+
+        # Create the working threads that handle tracking and dumping of
+        # mongodb activities. On return, these threads will have already
+        # started.
         workers_info = self._generate_workers(files, state, start_utc_secs,
                                               end_utc_secs)
         timer_control = self._periodically_report_status(state)
@@ -398,7 +397,7 @@ def main():
 
     def signal_handler(sig, dummy):
         """Handle the Ctrl+C signal"""
-        print 'Trying to gracefully exiting program...'
+        print 'Trying to gracefully exit the program...'
         recorder.force_quit_all()
     signal.signal(signal.SIGINT, signal_handler)
 
