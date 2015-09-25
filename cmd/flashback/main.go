@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"math"
@@ -100,7 +99,7 @@ func init() {
 		"[Optional] Number of workers that sends ops to database.")
 	flag.IntVar(&maxOps,
 		"maxOps",
-		0,
+		math.MaxUint32, // default value for maxOps is maxUint32
 		"[Optional] Maximal amount of ops to be replayed from the "+
 			"ops_filename file. By setting it to `0`, replayer will "+
 			"replay all the ops.")
@@ -158,18 +157,30 @@ func init() {
 
 func parseFlags() error {
 	flag.Parse()
-	if style != "stress" && style != "real" {
-		return errors.New("Missing or invalid `style` argument passed to program: " + style)
+	validArgs := true
+	errorMsg := ""
+
+	if style == "" {
+		validArgs = false
+		errorMsg = "Missing `style` argument."
+	} else if style != "stress" && style != "real" {
+		validArgs = false
+		errorMsg = "Invalid `style` argument passed to program: " + style + ". The only acceptable values are \"stress\" and \"real\"."
+	} else if opsFilename == "" {
+		validArgs = false
+		errorMsg = "Missing required `ops_filename` argument."
+	} else if workers <= 0 {
+		validArgs = false
+		errorMsg = "The `workers` argument must be a positive number."
 	}
-	if opsFilename == "" {
-		return errors.New("Missing required `ops_filename` argument")
+
+	if !validArgs {
+		fmt.Println(errorMsg)
+		fmt.Println("\nUsage:")
+		flag.PrintDefaults()
+		os.Exit(1)
 	}
-	if workers <= 0 {
-		return errors.New("The `workers` argument must be a positive number")
-	}
-	if maxOps == 0 {
-		maxOps = math.MaxUint32
-	}
+
 	var err error
 	if logger, err = flashback.NewLogger(stdout, stderr); err != nil {
 		return err
