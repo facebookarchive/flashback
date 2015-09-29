@@ -28,13 +28,22 @@ def tail_to_queue(tailer, identifier, doc_queue, state, end_time,
         it will sleep for a period of time and then try again.
     """
     tailer_state = state.tailer_states[identifier]
-    preformed_loops = 0
+    first_loop = True
     while tailer.alive and all(s.alive for s in state.tailer_states.values()):
         try:
-
             # Get the next doc from the tailing cursor
             doc = tailer.next()
-
+        except StopIteration:
+            if state.timeout:
+                break
+            tailer_state.last_get_none_ts = datetime.utcnow()
+            time.sleep(check_duration_secs)
+        except pymongo.errors.OperationFailure, e:
+            if first_loop:
+                utils.LOG.error(
+                    "BADRUN: source %s: We appear to not have the %s collection created or is non-capped! %s",
+                    identifier, tailer.collection, e)
+        else:
             # Set last_received_ts based on the latest doc
             tailer_state.last_received_ts = doc["ts"]
 
@@ -45,17 +54,8 @@ def tail_to_queue(tailer, identifier, doc_queue, state, end_time,
 
             doc_queue.put_nowait((identifier, doc))
             tailer_state.entries_received += 1
-        except StopIteration:
-            if state.timeout:
-                break
-            tailer_state.last_get_none_ts = datetime.now()
-            time.sleep(check_duration_secs)
-        except pymongo.errors.OperationFailure, e:
-            if preformed_loops == 0:
-                utils.LOG.error(
-                    "BADRUN: source %s: We appear to not have the %s collection created or is non-capped! %s",
-                    identifier, tailer.collection, e)
-        preformed_loops += 1
+
+        first_loop = False
 
     tailer_state.alive = False
     utils.LOG.info("source %s: Tailing to queue completed!", identifier)
@@ -72,11 +72,11 @@ class MongoQueryRecorder(object):
         def make_tailer_state():
             """Return the tailer state "struct" """
             s = utils.EmptyClass()
-            s.entries_received = 0
-            s.entries_written = 0
-            s.alive = True
-            s.last_received_ts = None
-            s.last_get_none_ts = None
+            s.entries_received = 0  # how many entries were put in the global doc queue
+            s.entries_written = 0  # how many entries were written to the output file
+            s.alive = True  # is this thread still alive (i.e. working)?
+            s.last_received_ts = None  # timestamp of the latest received doc
+            s.last_get_none_ts = None  # last time this thread didn't get anything from the tailing cursor
             return s
 
         def __init__(self, tailer_names):
