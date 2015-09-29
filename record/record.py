@@ -31,13 +31,17 @@ def tail_to_queue(tailer, identifier, doc_queue, state, end_time,
     preformed_loops = 0
     while tailer.alive and all(s.alive for s in state.tailer_states.values()):
         try:
+
+            # Get the next doc from the tailing cursor
             doc = tailer.next()
+
+            # Set last_received_ts based on the latest doc
             tailer_state.last_received_ts = doc["ts"]
+
+            # If it's time to stop recording or if the timestamp of the last
+            # received doc is >= end_time, break out of the loop
             if state.timeout and tailer_state.last_received_ts >= end_time:
                 break
-
-            if type(tailer_state.last_received_ts) is Timestamp:
-                tailer_state.last_received_ts.as_datetime()
 
             doc_queue.put_nowait((identifier, doc))
             tailer_state.entries_received += 1
@@ -251,9 +255,12 @@ class MongoQueryRecorder(object):
         """Generate the threads that tail the data sources and put the fetched
         entries to the files"""
 
-        # Create working threads to handle to track/dump mongodb activities
-        workers_info = []
+        # Initialize a thread-safe queue that we'll put the docs into
         doc_queue = Queue.Queue()
+
+        # Initialize a list that will keep track of all the worker threads that
+        # handle tracking/dumping of mongodb activities
+        workers_info = []
 
         # Writer thread, we only have one writer since we assume all files will
         # be written to the same device (disk or SSD), as a result it yields
@@ -287,8 +294,7 @@ class MongoQueryRecorder(object):
         end_datetime = datetime.utcfromtimestamp(end_utc_secs)
         for profiler_name, client in self.profiler_clients.items():
             for db in self.config["target_databases"]:
-                tailer = utils.get_profiler_tailer(client,
-                                                   db,
+                tailer = utils.get_profiler_tailer(client, db,
                                                    self.config["target_collections"],
                                                    start_datetime)
                 tailer_id = "%s_%s" % (db, profiler_name)
@@ -303,11 +309,13 @@ class MongoQueryRecorder(object):
                               end_datetime))
                 })
 
+        # Deamonize each thread and start it
         for worker_info in workers_info:
             utils.LOG.info("Starting thread: %s", worker_info["name"])
             worker_info["thread"].setDaemon(True)
             worker_info["thread"].start()
 
+        # Return the list of all the started threads
         return workers_info
 
     def _join_workers(self, state, workers_info):
@@ -338,7 +346,7 @@ class MongoQueryRecorder(object):
         return MongoQueryRecorder._report_status(state)
 
     def record(self):
-        """Record the activities in the multithreading way"""
+        """Record the activities in a multithreaded way"""
         start_utc_secs = utils.now_in_utc_secs()
         end_utc_secs = utils.now_in_utc_secs() + self.config["duration_secs"]
 
@@ -374,16 +382,21 @@ class MongoQueryRecorder(object):
                 and not self.force_quit:
             time.sleep(1)
 
+        # Indicate that it's time to stop
         state.timeout = True
 
+        # Wait until all the workers finish
         self._join_workers(state, workers_info)
-        timer_control.set()  # stop status report
+
+        # Stop reporting the status
+        timer_control.set()
         utils.LOG.info("Preliminary recording completed!")
 
+        # Close all the file handlers
         for f in files.values():
             f.close()
 
-        # Fill the missing insert op details from oplog
+        # Fill the missing insert op details from the oplog
         merge.merge_to_final_output(
             oplog_output_file=self.config["oplog_output_file"],
             profiler_output_files=profiler_output_files,
