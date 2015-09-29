@@ -113,6 +113,7 @@ class MongoQueryRecorder(object):
             utils.log.error("Detected either no profile or oplog servers, bailing")
             sys.exit(1)
 
+        # Connect to each MongoDB server that we want to get the oplog data from
         self.oplog_clients = {}
         for index, server in enumerate(oplog_servers):
             mongodb_uri = server['mongodb_uri']
@@ -120,9 +121,9 @@ class MongoQueryRecorder(object):
             server_string = "%s:%s" % (nodelist[0][0], nodelist[0][1])
 
             self.oplog_clients[server_string] = self.connect_mongo(server)
-            utils.LOG.info("oplog server %d: %s", index, self.sanatize_server(server))
+            utils.LOG.info("oplog server %d: %s", index, self.sanitize_server(server))
 
-        # Create a mongo client for each profiler server
+        # Connect to each MongoDB server that we want to get the profile data from
         self.profiler_clients = {}
         for index, server in enumerate(profiler_servers):
             mongodb_uri = server['mongodb_uri']
@@ -130,14 +131,15 @@ class MongoQueryRecorder(object):
             server_string = "%s:%s" % (nodelist[0][0], nodelist[0][1])
 
             self.profiler_clients[server_string] = self.connect_mongo(server)
-            utils.LOG.info("profiling server %d: %s", index, self.sanatize_server(server))
+            utils.LOG.info("profiling server %d: %s", index, self.sanitize_server(server))
 
-    def sanatize_server(self, server_config):
+        utils.LOG.info('Successfully connected to %d oplog server(s) and %d profiler server(s)', len(self.oplog_clients), len(self.profiler_clients))
+
+    def sanitize_server(self, server_config):
         if 'user' in server_config:
             server_config['user'] = "Redacted"
         if 'password' in server_config:
             server_config['password'] = "Redacted"
-        print(server_config)
         return server_config
 
     @staticmethod
