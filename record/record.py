@@ -164,12 +164,20 @@ class MongoQueryRecorder(object):
         msgs = []
         for key in state.tailer_states.keys():
             tailer_state = state.tailer_states[key]
+
+            # oplog tailer returns "ts" as a Timestamp - we want to be able
+            # to easily compare last_received_ts and last_get_none_ts, so
+            # we convert the Timestamp to a datetime
+            last_received_ts = tailer_state.last_received_ts
+            if isinstance(last_received_ts, Timestamp):
+                last_received_ts = last_received_ts.as_datetime()
+
             msg = "\n\t{}: received {} entries, {} of them were written, "\
                   "last received entry ts: {}, last get-none ts: {}" .format(
                       key,
                       tailer_state.entries_received,
                       tailer_state.entries_written,
-                      str(tailer_state.last_received_ts),
+                      str(last_received_ts),
                       str(tailer_state.last_get_none_ts))
             msgs.append(msg)
 
