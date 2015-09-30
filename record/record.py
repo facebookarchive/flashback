@@ -161,6 +161,7 @@ class MongoQueryRecorder(object):
                 queue_is_empty = True
                 continue
             else:
+                queue_is_empty = False
                 state.tailer_states[name].entries_written += 1
                 cPickle.dump(doc, files[name])
 
