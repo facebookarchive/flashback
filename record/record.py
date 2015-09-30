@@ -148,17 +148,25 @@ class MongoQueryRecorder(object):
     @staticmethod
     def _process_doc_queue(doc_queue, files, state):
         """Writes the incoming docs to the corresponding files"""
-        # Keep waiting if any of the tailer thread is still at work.
-        while any(s.alive for s in state.tailer_states.values()):
+
+        # Keep receiving docs via the global doc queue and dumping them to
+        # files if any of the tailer threads are still at work or if the
+        # doc queue is not empty.
+        queue_is_empty = False
+        while any(s.alive for s in state.tailer_states.values()) or not queue_is_empty:
             try:
                 name, doc = doc_queue.get(block=True, timeout=1)
+            except Queue.Empty:
+                # Continue if we still can't get anything from the queue after the timeout
+                queue_is_empty = True
+                continue
+            else:
                 state.tailer_states[name].entries_written += 1
                 cPickle.dump(doc, files[name])
-            except Queue.Empty:
-                # gets nothing after timeout
-                continue
+
         for f in files.values():
             f.flush()
+
         utils.LOG.info("All received docs are processed!")
 
     @staticmethod
