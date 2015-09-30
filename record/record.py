@@ -21,11 +21,14 @@ def tail_to_queue(tailer, identifier, doc_queue, state, end_time,
     """
     Accept a tailing cursor and serialize the retrieved documents to a fifo
     queue.
+
     @param identifier: when passing the retrieved document to the queue, we
         will attach a unique identifier that allows the queue consumers to
-        process different sources of documents accordingly.
+        process different sources of documents accordingly. There's a separate
+        identifier for the oplog and for each database-host pair for which
+        we tail the profile collection.
     @param check_duration_secs: if we cannot retrieve the latest document,
-        it will sleep for a period of time and then try again.
+        this queuing loop will sleep for that many seconds and then try again.
     """
     tailer_state = state.tailer_states[identifier]
     first_loop = True
