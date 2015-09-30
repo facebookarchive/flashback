@@ -285,37 +285,47 @@ class MongoQueryRecorder(object):
                 args=(doc_queue, files, state))
         })
 
-        # Create an oplog collection tailer for each db
-        for profiler_name, client in self.oplog_clients.items():
-            tailer = utils.get_oplog_tailer(client, ["i"],
+        # For each server in the "oplog_servers" config...
+        for server_string, mongo_client in self.oplog_clients.items():
+
+            # Create a tailing cursor (aka a tailer) on an oplog collection
+            tailer = utils.get_oplog_tailer(mongo_client, ["i"],
                                             self.config["target_databases"],
                                             self.config["target_collections"],
                                             Timestamp(start_utc_secs, 0))
-            oplog_cursor_id = tailer.cursor_id
+
+            # Create a new thread and add some metadata to it
             workers_info.append({
-                "name": "tailing-oplogs on %s" % profiler_name,
+                "name": "tailing-oplogs on %s" % server_string,
                 "on_close":
-                    lambda: self.oplog_client.kill_cursors([oplog_cursor_id]),
+                    lambda: self.oplog_client.kill_cursors([tailer.cursor_id]),
                 "thread": Thread(
                     target=tail_to_queue,
                     args=(tailer, "oplog", doc_queue, state,
                           Timestamp(end_utc_secs, 0)))
             })
 
-        # Create a profile collection tailer for each db
         start_datetime = datetime.utcfromtimestamp(start_utc_secs)
         end_datetime = datetime.utcfromtimestamp(end_utc_secs)
-        for profiler_name, client in self.profiler_clients.items():
+
+
+        # For each server in the "profiler_servers" config...
+        for server_string, mongo_client in self.profiler_clients.items():
+
+            # For each database in the "target_databases" config...
             for db in self.config["target_databases"]:
-                tailer = utils.get_profiler_tailer(client, db,
+
+                # Create a tailing cursor (aka a tailer) on a profile collection
+                tailer = utils.get_profiler_tailer(mongo_client, db,
                                                    self.config["target_collections"],
                                                    start_datetime)
-                tailer_id = "%s_%s" % (db, profiler_name)
-                profiler_cursor_id = tailer.cursor_id
+
+                # Create a new thread and add some metadata to it
+                tailer_id = "%s_%s" % (db, server_string)
                 workers_info.append({
-                    "name": "tailing-profiler for %s on %s" % (db, profiler_name),
+                    "name": "tailing-profiler for %s on %s" % (db, server_string),
                     "on_close":
-                        lambda: self.profiler_client.kill_cursors([profiler_cursor_id]),
+                        lambda: self.profiler_client.kill_cursors([tailer.cursor_id]),
                     "thread": Thread(
                         target=tail_to_queue,
                         args=(tailer, tailer_id, doc_queue, state,
