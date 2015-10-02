@@ -1,5 +1,6 @@
 """This script allows us to manually merge the results from oplog and profiling
 results."""
+import os
 import utils
 import config
 import calendar
@@ -39,12 +40,12 @@ def merge_to_final_output(oplog_output_file, profiler_output_files, output_file)
         on-time merge since you cannot determine if some "old" entries will come
         later."""
     oplog = open(oplog_output_file, "rb")
-    
+
     # create a map of profiler file names to files
     profiler_files = {}
     for profiler_file in profiler_output_files:
         profiler_files[profiler_file] = open(profiler_file, "rb")
-        
+
     output = open(output_file, "wb")
     logger = utils.LOG
 
@@ -68,7 +69,7 @@ def merge_to_final_output(oplog_output_file, profiler_output_files, output_file)
     while oplog_doc and len(profiler_docs) > 0:
         if (noninserts + inserts) % 2500 == 0:
             logger.info("processed %d items", noninserts + inserts)
-            
+
         # get the earliest profile doc out of all profiler_docs
         key = min(profiler_docs.keys())
         profiler_doc = profiler_docs[key]
@@ -121,7 +122,7 @@ def merge_to_final_output(oplog_output_file, profiler_output_files, output_file)
         doc = utils.unpickle(profiler_files[key[1]])
         if doc:
             profiler_docs[(doc["ts"], key[1])] = doc
-            
+
         if profiler_doc["op"] == "insert":
             break
         dump_op(output, profiler_doc)
@@ -132,10 +133,17 @@ def merge_to_final_output(oplog_output_file, profiler_output_files, output_file)
                 "  severe ts incosistencies: %d\n"
                 "  mild ts incosistencies: %d\n", inserts, noninserts,
                 severe_inconsistencies, mild_inconsistencies)
+
     for f in [oplog, output]:
         f.close()
     for f in profiler_files.values():
         f.close()
+
+    # Clean up temporary files (oplog + profiler files), since everything is
+    # already in the main output file
+    for f in profiler_output_files:
+        os.remove(f)
+    os.remove(oplog_output_file)
 
     return True
 

@@ -13,6 +13,7 @@ import time
 import utils
 import signal
 import merge
+import os
 import sys
 
 
@@ -397,6 +398,14 @@ class MongoQueryRecorder(object):
         """Record the activities in a multithreaded way"""
         start_utc_secs = utils.now_in_utc_secs()
         end_utc_secs = utils.now_in_utc_secs() + self.config["duration_secs"]
+
+        # If overwrite_output_file setting is False, determine the actual name
+        # of the output file
+        if not self.config["overwrite_output_file"]:
+            cnt = 2
+            while os.path.exists(self.config["output_file"]):
+                self.config["oplog_output_file"] += '_%d' % cnt
+                self.config["output_file"] += '_%d' % cnt
 
         # We'll dump the recorded activities to `files`.
         files = {

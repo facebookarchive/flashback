@@ -27,6 +27,12 @@ DB_CONFIG = {
     "oplog_output_file": "./OPLOG_OUTPUT",
     "output_file": "./OUTPUT",
 
+    # If overwrite_output_file is True, the same output file will be
+    # overwritten is False in between consecutive calls of the recorer. If
+    # it's False, the recorder will append a unique number to the end of the
+    # output_file if the original one already exists.
+    "overwrite_output_file": True,
+
     # The length for the recording
     "duration_secs": 10,
 }
