@@ -32,25 +32,41 @@ def tail_to_queue(tailer, identifier, doc_queue, state, end_time,
     """
     tailer_state = state.tailer_states[identifier]
     first_loop = True
-    while tailer.alive and all(s.alive for s in state.tailer_states.values()):
+    while all(s.alive for s in state.tailer_states.values()):
         try:
             # Get the next doc from the tailing cursor
             doc = tailer.next()
         except StopIteration:
+
+            # If the tailing cursor is dead, print a debug message and break
+            # out of the loop (since it's a tailing cursor, it should be alive
+            # even if it can't return any new docs). One reason for a cursor
+            # to die is if it becomes "stale", as in, the latest doc it
+            # pointed to is no longer available in the collection.
+            if not tailer.alive:
+                utils.LOG.debug(
+                    "%s: The tailing cursor is dead. Your profile collection "
+                    "might be too small for the amount of new docs that are "
+                    "being written to it.", identifier)
+                break
+
+            # If it's time to stop recording, break out of the loop
             if state.timeout:
                 break
+
             tailer_state.last_get_none_ts = datetime.utcnow()
             time.sleep(check_duration_secs)
         except pymongo.errors.OperationFailure, e:
+            utils.LOG.debug("%s", e)
             if first_loop:
                 utils.LOG.error(
-                    "BADRUN: source %s: We appear to not have the %s collection created or is non-capped! %s",
+                    "BADRUN: %s: We appear to not have the %s collection created or is non-capped! %s",
                     identifier, tailer.collection, e)
         else:
             # Set last_received_ts based on the latest doc
             tailer_state.last_received_ts = doc["ts"]
 
-            # If it's time to stop recording or if the timestamp of the last
+            # If it's time to stop recording and the timestamp of the last
             # received doc is >= end_time, break out of the loop
             if state.timeout and tailer_state.last_received_ts >= end_time:
                 break
@@ -61,7 +77,7 @@ def tail_to_queue(tailer, identifier, doc_queue, state, end_time,
         first_loop = False
 
     tailer_state.alive = False
-    utils.LOG.info("source %s: Tailing to queue completed!", identifier)
+    utils.LOG.info("%s: Tailing to queue completed!", identifier)
 
 
 class MongoQueryRecorder(object):
@@ -413,6 +429,13 @@ class MongoQueryRecorder(object):
                 and (utils.now_in_utc_secs() < end_utc_secs) \
                 and not self.force_quit:
             time.sleep(1)
+
+        # Log the reason for stopping
+        utils.LOG.debug("Stopping the recording! All tailers alive: %s; End time passed: %s; Force quit requested: %s.",
+            all(s.alive for s in state.tailer_states.values()),
+            (utils.now_in_utc_secs() >= end_utc_secs),
+            self.force_quit
+        )
 
         # Indicate that it's time to stop
         state.timeout = True
