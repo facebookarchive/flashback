@@ -394,18 +394,39 @@ class MongoQueryRecorder(object):
     def _periodically_report_status(self, state):
         return MongoQueryRecorder._report_status(state)
 
+    def get_noncolliding_config(self):
+        """
+        Return a config dict containing output filenames that don't collide
+        with any files that already exist on the disk.
+        """
+        needs_change = os.path.exists(self.config["output_file"]) or \
+                       os.path.exists(self.config["oplog_output_file"])
+        if needs_change:
+            new_config = {
+                'oplog_output_file': self.config['oplog_output_file'],
+                'output_file': self.config['output_file'],
+            }
+            cnt = 1
+            while (
+                os.path.exists(self.config["output_file"] + '_%d' % cnt) or
+                os.path.exists(self.config["oplog_output_file"] + '_%d' % cnt)
+            ):
+                cnt += 1
+
+            new_config['output_file'] += '_%d' % cnt
+            new_config['oplog_output_file'] += '_%d' % cnt
+
+        return new_config
+
     def record(self):
         """Record the activities in a multithreaded way"""
         start_utc_secs = utils.now_in_utc_secs()
         end_utc_secs = utils.now_in_utc_secs() + self.config["duration_secs"]
 
         # If overwrite_output_file setting is False, determine the actual name
-        # of the output file
+        # of the output files
         if not self.config["overwrite_output_file"]:
-            cnt = 2
-            while os.path.exists(self.config["output_file"]):
-                self.config["oplog_output_file"] += '_%d' % cnt
-                self.config["output_file"] += '_%d' % cnt
+            self.config.update(self.get_noncolliding_config())
 
         # We'll dump the recorded activities to `files`.
         files = {
