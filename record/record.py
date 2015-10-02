@@ -420,8 +420,9 @@ class MongoQueryRecorder(object):
             for db in self.config["target_databases"]:
                 tailer_name = "%s_%s" % (db, client_name)
                 tailer_names.append(tailer_name)
-                profiler_output_files.append(tailer_name)
-                files[tailer_name] = open(tailer_name, "wb")
+                fname = "%s_%s" % (self.config["output_file"], tailer_name)
+                profiler_output_files.append(fname)
+                files[tailer_name] = open(fname, "wb")
         tailer_names.append("oplog")
 
         state = MongoQueryRecorder.RecordingState(tailer_names)
