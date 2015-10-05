@@ -314,7 +314,8 @@ class MongoQueryRecorder(object):
         # For each server in the "oplog_servers" config...
         for server_string, mongo_client in self.oplog_clients.items():
 
-            # Create a tailing cursor (aka a tailer) on an oplog collection
+            # Create a tailing cursor (aka a tailer) on an oplog collection.
+            # "i" stands for the only op type we care about, which is an insert
             tailer = utils.get_oplog_tailer(mongo_client, ["i"],
                                             self.config["target_databases"],
                                             self.config["target_collections"],
