@@ -1,12 +1,11 @@
 """This script allows us to manually merge the results from oplog and profiling
 results."""
-import os
-import utils
-import config
 import calendar
+import config
+import os
 import sys
-from bson.json_util import dumps
-
+import utils
+from bson import BSON
 
 def dump_op(output, op):
     copier = utils.DictionaryCopier(op)
@@ -25,9 +24,7 @@ def dump_op(output, op):
     elif op_type == "command":
         copier.copy_fields("command")
 
-    output.write(dumps(copier.dest))
-    output.write("\n")
-
+    output.write(BSON.encode(copier.dest))
 
 def merge_to_final_output(oplog_output_file, profiler_output_files, output_file):
     """
