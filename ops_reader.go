@@ -1,14 +1,16 @@
 package flashback
 
 import (
-	"bufio"
 	"errors"
 	"io"
 	"os"
 	"strings"
 	"time"
 
+	"gopkg.in/mgo.v2/bson"
+
 	"github.com/mongodb/mongo-tools/common/bsonutil" // requires go 1.4
+	"github.com/mongodb/mongo-tools/common/db"
 	"github.com/mongodb/mongo-tools/common/json"
 )
 
@@ -47,29 +49,30 @@ type OpsReader interface {
 // convert some "metadata" into MongoDB specific data structures, like "Object
 // Id" and datetime.
 type ByLineOpsReader struct {
-	lineReader *bufio.Reader
-	err        error
-	opsRead    int
-	closeFunc  func()
-	logger     *Logger
-	opFilters  []string
+	err       error
+	opsRead   int
+	closeFunc func()
+	logger    *Logger
+	opFilters []OpType
+	src       *db.DecodedBSONSource
 }
 
-func NewByLineOpsReader(reader io.Reader, logger *Logger, opFilter string) (error, *ByLineOpsReader) {
-	opFilters := make([]string, 0)
+func NewByLineOpsReader(reader io.ReadCloser, logger *Logger, opFilter string) (error, *ByLineOpsReader) {
+	opFilters := make([]OpType, 0)
 	if opFilter != "" {
-		opFilters = strings.Split(opFilter, ",")
+		filterList := strings.Split(opFilter, ",")
+		for _, filter := range filterList {
+			opFilters = append(opFilters, OpType(filter))
+		}
 	}
 	return nil, &ByLineOpsReader{
-		lineReader: bufio.NewReaderSize(reader, 5*1024*1024),
-		err:        nil,
-		opsRead:    0,
-		logger:     logger,
-		opFilters:  opFilters,
+		src:       db.NewDecodedBSONSource(db.NewBSONSource(reader)),
+		err:       nil,
+		opsRead:   0,
+		logger:    logger,
+		opFilters: opFilters,
 	}
 }
-
-// func NewCyclicOpsReader(func() ops_reader_maker *OpsReader) (error, OpsReader)
 
 func NewFileByLineOpsReader(filename string, logger *Logger, opFilter string) (error, *ByLineOpsReader) {
 	file, err := os.Open(filename)
@@ -87,12 +90,10 @@ func NewFileByLineOpsReader(filename string, logger *Logger, opFilter string) (e
 }
 
 func (r *ByLineOpsReader) SkipOps(numSkipOps int) error {
+	var op RawOp
 	for numSkipped := 0; numSkipped < numSkipOps; numSkipped++ {
-		_, err := r.lineReader.ReadString('\n')
-
-		// Return if we get an error reading the error, or hit EOF
-		if err != nil || err == io.EOF {
-			return err
+		if ok := r.src.Next(&op); !ok {
+			return r.src.Err()
 		}
 	}
 
@@ -104,24 +105,16 @@ func (r *ByLineOpsReader) SetStartTime(startTime int64) (int64, error) {
 	var numSkipped int64
 	searchTime := time.Unix(startTime/1000, startTime%1000*1000000)
 
-	for true {
+	var op RawOp
+	for {
 		// The nature of this function is that it will discard the first op
-		jsonText, err := r.lineReader.ReadString('\n')
+		if ok := r.src.Next(&op); !ok {
+			return numSkipped, r.src.Err()
+		}
 		numSkipped++
 
-		// Return if we get an error reading the error, or hit EOF
-		if err != nil || err == io.EOF {
-			return numSkipped, err
-		}
-
-		rawObj, err := parseJson(jsonText)
-		if err != nil {
-			return numSkipped, err
-		}
-
-		timestamp := rawObj["ts"].(time.Time)
-		if timestamp.After(searchTime) || timestamp.Equal(searchTime) {
-			actualTime := timestamp
+		if op.Timestamp.After(searchTime) || op.Timestamp.Equal(searchTime) {
+			actualTime := op.Timestamp
 			r.logger.Infof("Skipped %d ops to begin at timestamp %d.", numSkipped, actualTime)
 			return numSkipped, nil
 		}
@@ -132,21 +125,14 @@ func (r *ByLineOpsReader) SetStartTime(startTime int64) (int64, error) {
 
 func (r *ByLineOpsReader) Next() *Op {
 	// we may need to skip certain type of ops
+	var rawOp RawOp
 	for {
-		jsonText, err := r.lineReader.ReadString('\n')
-		r.err = err
-
-		if err != nil && err != io.EOF {
+		if ok := r.src.Next(&rawOp); !ok {
 			return nil
 		}
 
-		rawObj, err := parseJson(jsonText)
-		r.err = err
-		if err != nil {
-			return nil
-		}
 		r.opsRead++
-		op := makeOp(rawObj, r.opFilters)
+		op := makeOp(rawOp, r.opFilters)
 		if op == nil {
 			continue
 		}
@@ -172,6 +158,28 @@ func (r *ByLineOpsReader) Close() {
 	}
 }
 
+// Some operations are recorded with empty values for $set, $unset
+// When these are replayed against a mongo instance, they generate an error and do not execute
+// This method will detect and remove these empty blocks before the query is executed
+func PruneEmptyUpdateObj(doc Document, opType OpType) {
+	keysToPrune := []string{"$set", "$unset"}
+
+	if opType == Command {
+		// only do this for findandmodify
+		commandDoc := doc["command"].(bson.D)
+		// on properly ordered docs the first element should always be the command name
+		if commandDoc[0].Name != "findandmodify" {
+			return
+		}
+		commandDoc = pruneEmptyKeys(commandDoc, keysToPrune)
+		doc["command"] = commandDoc
+	} else if opType == Update {
+		updateDoc := doc["updateobj"].(bson.D)
+		updateDoc = pruneEmptyKeys(updateDoc, keysToPrune)
+		doc["updateobj"] = updateDoc
+	}
+}
+
 // Convert a json string to a raw document
 func parseJson(jsonText string) (Document, error) {
 	rawObj := Document{}
@@ -191,51 +199,35 @@ func normalizeObj(rawObj Document) error {
 	return bsonutil.ConvertJSONDocumentToBSON(rawObj)
 }
 
-// Some operations are recorded with empty values for $set, $unset, and possibly $inc
-// When these are replayed against a mongo instance, they generate an error and do not execute
-// This method will detect and remove these empty blocks before the query is executed
-// A couple of examples are below
-// {"ns": "appdata68.$cmd", "command": {"query": {"$or": [{"_acl": {"$exists": false}}, {"_acl.*.w": true}], "_id": "5Npn4XbXVF"}, "findandmodify": "app_0ecb3ea0-a35a-4fa6-b1a8-2bf66ae160ff:_Installation", "update": {"$set": {"_updated_at": {"$date": 1396457187276}}, "$unset": {}, "$addToSet": {"channels": {"$each": ["", "v5420"]}}}, "new": true}, "ts": {"$date": 1396457187283}, "op": "command"}
-// {"query": {"$or": [{"_acl": {"$exists": false}}, {"_acl.*.w": true}], "_id": "YDHJwP5hFX"}, "updateobj": {"$set": {"_updated_at": {"$date": 1396457119032}}, "$unset": {}}, "ns": "appdata66.app_0939ec2a-b247-4485-b741-bfe069791305:Prize", "op": "update", "ts": {"$date": 1396457119032}}
-func PruneEmptyUpdateObj(doc Document, opType string) {
-	var updateObj map[string]interface{}
-
-	if opType == "command" {
-		// only do this for findandmodify
-		command := doc["command"].(map[string]interface{})
-		if command["findandmodify"] == nil {
-			return
-		}
-		updateObj = command["update"].(map[string]interface{})
-	} else if opType == "update" {
-		updateObj = doc["updateobj"].(map[string]interface{})
-	} else {
-		return
+func pruneEmptyKeys(doc bson.D, keys []string) bson.D {
+	keyMap := map[string]struct{}{}
+	for _, key := range keys {
+		keyMap[key] = struct{}{}
 	}
 
-	operators := [3]string{"$set", "$unset", "$inc"}
-
-	for _, operator := range operators {
-		if updateObj[operator] != nil {
-			checkMap := updateObj[operator].(map[string]interface{})
-			if len(checkMap) == 0 {
-				delete(updateObj, operator)
+	prunedDoc := bson.D{}
+	for _, elem := range doc {
+		if _, ok := keyMap[elem.Name]; ok {
+			opValue := elem.Value.(bson.D)
+			if len(opValue) > 0 {
+				prunedDoc = append(prunedDoc, elem)
 			}
+		} else {
+			prunedDoc = append(prunedDoc, elem)
 		}
 	}
+
+	return prunedDoc
 }
 
-func makeOp(rawDoc Document, opFilters []string) *Op {
-	opType := rawDoc["op"].(string)
-	ts := rawDoc["ts"].(time.Time)
-	ns := rawDoc["ns"].(string)
-	parts := strings.SplitN(ns, ".", 2)
+func makeOp(rawOp RawOp, opFilters []OpType) *Op {
+	parts := strings.SplitN(rawOp.Ns, ".", 2)
 	dbName, collName := parts[0], parts[1]
 
 	if len(opFilters) != 0 {
 		filtered := false
 		for _, opFilter := range opFilters {
-			if opType == opFilter {
+			if rawOp.Type == opFilter {
 				filtered = true
 				break
 			}
@@ -247,31 +239,31 @@ func makeOp(rawDoc Document, opFilters []string) *Op {
 
 	var content Document
 	// we only handpick the fields that will be of useful for a given op type.
-	switch opType {
-	case "insert":
-		content = Document{"o": rawDoc["o"].(map[string]interface{})}
-	case "query":
+	switch rawOp.Type {
+	case Insert:
+		content = Document{"o": rawOp.InsertDoc}
+	case Query:
 		content = Document{
-			"query":     rawDoc["query"],
-			"ntoreturn": rawDoc["ntoreturn"],
-			"ntoskip":   rawDoc["ntoskip"],
+			"query":     rawOp.QueryDoc,
+			"ntoreturn": rawOp.NToReturn,
+			"ntoskip":   rawOp.NToSkip,
 		}
-	case "update":
+	case Update:
 		content = Document{
-			"query":     rawDoc["query"],
-			"updateobj": rawDoc["updateobj"],
+			"query":     rawOp.QueryDoc,
+			"updateobj": rawOp.UpdateDoc,
 		}
 
-		PruneEmptyUpdateObj(content, opType)
-	case "command":
-		content = Document{"command": rawDoc["command"]}
-		PruneEmptyUpdateObj(content, opType)
-	case "remove":
-		content = Document{"query": rawDoc["query"]}
+		PruneEmptyUpdateObj(content, rawOp.Type)
+	case Command:
+		content = Document{"command": rawOp.CommandDoc}
+		PruneEmptyUpdateObj(content, rawOp.Type)
+	case Remove:
+		content = Document{"query": rawOp.QueryDoc}
 	default:
 		return nil
 	}
-	return &Op{dbName, collName, OpType(opType), ts, content}
+	return &Op{dbName, collName, rawOp.Type, rawOp.Timestamp, content}
 }
 
 type CyclicOpsReader struct {

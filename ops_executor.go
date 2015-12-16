@@ -3,8 +3,10 @@ package flashback
 import (
 	"errors"
 	"fmt"
-	"gopkg.in/mgo.v2"
 	"time"
+
+	"gopkg.in/mgo.v2"
+	"gopkg.in/mgo.v2/bson"
 )
 
 var (
@@ -85,8 +87,30 @@ func (e *OpsExecutor) execCount(content Document, coll *mgo.Collection) error {
 
 func (e *OpsExecutor) execFindAndModify(content Document, coll *mgo.Collection) error {
 	result := Document{}
-	change := mgo.Change{Update: content["update"].(map[string]interface{})}
-	_, err := coll.Find(content["query"]).Apply(change, result)
+	var query, update bson.D
+
+	// Maybe clean this up later using a struct
+	if commandDoc, ok := content["command"].(bson.D); ok {
+		if value, ok := GetElem(commandDoc, "query"); ok {
+			if query, ok = value.(bson.D); !ok {
+				return fmt.Errorf("bad query document in findAndModify operation")
+			}
+		} else {
+			return fmt.Errorf("missing query document in findAndModify operation")
+		}
+		if value, ok := GetElem(commandDoc, "update"); ok {
+			if update, ok = value.(bson.D); !ok {
+				return fmt.Errorf("bad update document in findAndModify operation")
+			}
+		} else {
+			return fmt.Errorf("missing update document in findAndModify operation")
+		}
+	} else {
+		fmt.Errorf("bad command document in findAndModify operation")
+	}
+
+	change := mgo.Change{Update: update}
+	_, err := coll.Find(query).Apply(change, result)
 	return err
 }
 
@@ -101,18 +125,16 @@ func CanonicalizeOp(op *Op) *Op {
 		return op
 	}
 
-	cmd := op.Content["command"].(map[string]interface{})
+	// the command to be run is the first element in the command document
+	// TODO: these unprotected type assertions aren't great, but one problem at at time
+	cmd := op.Content["command"].(bson.D)[0]
 
-	for _, name := range []string{"findandmodify", "count"} {
-		collName, exist := cmd[name]
-		if !exist {
-			continue
-		}
+	if cmd.Name == "count" || cmd.Name == "findandmodify" {
+		collName := cmd.Value.(string)
 
-		op.Type = OpType("command." + name)
-		op.Collection = collName.(string)
-		op.Content = cmd
-
+		op.Type = OpType("command." + cmd.Name)
+		op.Collection = collName
+		//	op.Content = cmd
 		return op
 	}
 
