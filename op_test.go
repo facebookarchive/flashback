@@ -13,7 +13,7 @@ const (
 	testTime = int64(1450208315)
 )
 
-func TestRawOpUnmarshal(t *testing.T) {
+func TestOpUnmarshal(t *testing.T) {
 	t.Parallel()
 	testCmd := bson.D{{"z", 1}, {"a", 1}}
 	testQuery := bson.D{{"a", 1}, {"z", 1}}
@@ -40,17 +40,17 @@ func TestRawOpUnmarshal(t *testing.T) {
 	testQueryDocBytes, err := bson.Marshal(testQueryDoc)
 	ensure.Nil(t, err)
 
-	var testCmdRawOp, testQueryRawOp RawOp
-	err = bson.Unmarshal(testCmdDocBytes, &testCmdRawOp)
+	var testCmdOp, testQueryOp Op
+	err = bson.Unmarshal(testCmdDocBytes, &testCmdOp)
 	ensure.Nil(t, err)
 
-	err = bson.Unmarshal(testQueryDocBytes, &testQueryRawOp)
+	err = bson.Unmarshal(testQueryDocBytes, &testQueryOp)
 	ensure.Nil(t, err)
 
 	ensure.Subset(
 		t,
-		testCmdRawOp,
-		RawOp{
+		testCmdOp,
+		Op{
 			Timestamp:  time.Unix(testTime, 0),
 			Ns:         "foo",
 			Type:       Command,
@@ -59,8 +59,8 @@ func TestRawOpUnmarshal(t *testing.T) {
 	)
 	ensure.Subset(
 		t,
-		testQueryRawOp,
-		RawOp{
+		testQueryOp,
+		Op{
 			Timestamp: time.Unix(testTime, 0),
 			Ns:        "foo",
 			Type:      Query,

@@ -13,7 +13,7 @@ var (
 	NotSupported = errors.New("op type not supported")
 )
 
-type execute func(content Document, collection *mgo.Collection) error
+type execute func(op *Op, collection *mgo.Collection) error
 
 type OpsExecutor struct {
 	session   *mgo.Session
@@ -45,68 +45,55 @@ func NewOpsExecutor(session *mgo.Session, statsChan chan OpStat, logger *Logger)
 	return e
 }
 
-func (e *OpsExecutor) execQuery(
-	content Document, coll *mgo.Collection) error {
-	query := coll.Find(content["query"])
+func (e *OpsExecutor) execQuery(op *Op, coll *mgo.Collection) error {
+	query := coll.Find(op.QueryDoc)
+	if op.NToSkip != 0 {
+		query.Skip(int(op.NToSkip))
+	}
+	if op.NToReturn != 0 {
+		query.Limit(int(op.NToReturn))
+	}
 	result := []Document{}
-	if content["ntoreturn"] != nil {
-		if ntoreturn, err := safeGetInt(content["ntoreturn"]); err != nil {
-			e.logger.Error("could not set ntoreturn: ", err)
-		} else {
-			query.Limit(ntoreturn)
-		}
-	}
-	if content["ntoskip"] != nil {
-		if ntoskip, err := safeGetInt(content["ntoskip"]); err != nil {
-			e.logger.Error("could not set ntoskip: ", err)
-		} else {
-			query.Skip(ntoskip)
-		}
-	}
 	err := query.All(&result)
 	e.lastResult = &result
 	return err
 }
 
-func (e *OpsExecutor) execInsert(content Document, coll *mgo.Collection) error {
-	return coll.Insert(content["o"])
+func (e *OpsExecutor) execInsert(op *Op, coll *mgo.Collection) error {
+	return coll.Insert(op.InsertDoc)
 }
 
-func (e *OpsExecutor) execUpdate(content Document, coll *mgo.Collection) error {
-	return coll.Update(content["query"], content["updateobj"])
+func (e *OpsExecutor) execUpdate(op *Op, coll *mgo.Collection) error {
+	return coll.Update(op.QueryDoc, op.UpdateDoc)
 }
 
-func (e *OpsExecutor) execRemove(content Document, coll *mgo.Collection) error {
-	return coll.Remove(content["query"])
+func (e *OpsExecutor) execRemove(op *Op, coll *mgo.Collection) error {
+	return coll.Remove(op.QueryDoc)
 }
 
-func (e *OpsExecutor) execCount(content Document, coll *mgo.Collection) error {
+func (e *OpsExecutor) execCount(op *Op, coll *mgo.Collection) error {
 	_, err := coll.Count()
 	return err
 }
 
-func (e *OpsExecutor) execFindAndModify(content Document, coll *mgo.Collection) error {
+func (e *OpsExecutor) execFindAndModify(op *Op, coll *mgo.Collection) error {
 	result := Document{}
 	var query, update bson.D
 
 	// Maybe clean this up later using a struct
-	if commandDoc, ok := content["command"].(bson.D); ok {
-		if value, ok := GetElem(commandDoc, "query"); ok {
-			if query, ok = value.(bson.D); !ok {
-				return fmt.Errorf("bad query document in findAndModify operation")
-			}
-		} else {
-			return fmt.Errorf("missing query document in findAndModify operation")
-		}
-		if value, ok := GetElem(commandDoc, "update"); ok {
-			if update, ok = value.(bson.D); !ok {
-				return fmt.Errorf("bad update document in findAndModify operation")
-			}
-		} else {
-			return fmt.Errorf("missing update document in findAndModify operation")
+	if value, ok := GetElem(op.CommandDoc, "query"); ok {
+		if query, ok = value.(bson.D); !ok {
+			return fmt.Errorf("bad query document in findAndModify operation")
 		}
 	} else {
-		fmt.Errorf("bad command document in findAndModify operation")
+		return fmt.Errorf("missing query document in findAndModify operation")
+	}
+	if value, ok := GetElem(op.CommandDoc, "update"); ok {
+		if update, ok = value.(bson.D); !ok {
+			return fmt.Errorf("bad update document in findAndModify operation")
+		}
+	} else {
+		return fmt.Errorf("missing update document in findAndModify operation")
 	}
 
 	change := mgo.Change{Update: update}
@@ -127,14 +114,13 @@ func CanonicalizeOp(op *Op) *Op {
 
 	// the command to be run is the first element in the command document
 	// TODO: these unprotected type assertions aren't great, but one problem at at time
-	cmd := op.Content["command"].(bson.D)[0]
+	cmd := op.CommandDoc[0]
 
 	if cmd.Name == "count" || cmd.Name == "findandmodify" {
 		collName := cmd.Value.(string)
 
 		op.Type = OpType("command." + cmd.Name)
 		op.Collection = collName
-		//	op.Content = cmd
 		return op
 	}
 
@@ -167,10 +153,11 @@ func retryOnSocketFailure(block func() error, session *mgo.Session, logger *Logg
 func (e *OpsExecutor) Execute(op *Op) error {
 	startOp := time.Now()
 
+	op = CanonicalizeOp(op)
+
 	block := func() error {
-		content := op.Content
 		coll := e.session.DB(op.Database).C(op.Collection)
-		return e.subExecutes[op.Type](content, coll)
+		return e.subExecutes[op.Type](op, coll)
 	}
 	err := retryOnSocketFailure(block, e.session, e.logger)
 

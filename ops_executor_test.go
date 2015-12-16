@@ -26,7 +26,7 @@ func TestExecution(t *testing.T) {
 	testNs := fmt.Sprintf("%s.%s", test_db, test_collection)
 
 	// insertion
-	insertOp := RawOp{
+	insertOp := &Op{
 		Ns:        testNs,
 		Timestamp: time.Unix(1396456709, int64(427*time.Millisecond)),
 		InsertDoc: bson.D{
@@ -37,18 +37,18 @@ func TestExecution(t *testing.T) {
 		},
 		Type: Insert,
 	}
-	op := CanonicalizeOp(makeOp(insertOp, make([]OpType, 0)))
+	normalizeOp(insertOp)
 	logger, err := NewLogger("", "")
 	ensure.Nil(t, err)
 	exec := NewOpsExecutor(session, nil, logger)
-	err = exec.Execute(op)
+	err = exec.Execute(insertOp)
 	ensure.Nil(t, err)
 	coll := session.DB(test_db).C(test_collection)
 	count, err := coll.Count()
 	ensure.DeepEqual(t, count, 1)
 
 	// Find
-	findOp := RawOp{
+	findOp := &Op{
 		Ns:        testNs,
 		Timestamp: time.Unix(1396456709, int64(472*time.Millisecond)),
 		QueryDoc: bson.D{
@@ -63,9 +63,8 @@ func TestExecution(t *testing.T) {
 		NToReturn: 1,
 		NToSkip:   0,
 	}
-	op = CanonicalizeOp(makeOp(findOp, make([]OpType, 0)))
-
-	err = exec.Execute(op)
+	normalizeOp(findOp)
+	err = exec.Execute(findOp)
 	ensure.Nil(t, err)
 
 	findResult := exec.lastResult.(*[]Document)
@@ -73,7 +72,7 @@ func TestExecution(t *testing.T) {
 	exec.lastResult = nil
 
 	// Update
-	updateOp := RawOp{
+	updateOp := &Op{
 		Ns:        testNs,
 		Timestamp: time.Unix(1396456709, int64(472*time.Millisecond)),
 		QueryDoc: bson.D{
@@ -85,18 +84,20 @@ func TestExecution(t *testing.T) {
 		Type: Update,
 	}
 
-	err = exec.Execute(CanonicalizeOp(makeOp(updateOp, make([]OpType, 0))))
+	normalizeOp(updateOp)
+	err = exec.Execute(updateOp)
 	ensure.Nil(t, err)
 
 	// Check that the document is updated
-	err = exec.Execute(CanonicalizeOp(makeOp(findOp, make([]OpType, 0))))
+	normalizeOp(findOp)
+	err = exec.Execute(findOp)
 	ensure.Nil(t, err)
 	findResult = exec.lastResult.(*[]Document)
 	ensure.DeepEqual(t, (*findResult)[0]["logType"].(string), "hooo")
 	findResult = nil
 
 	// findAndModify
-	famOp := RawOp{
+	famOp := &Op{
 		Ns:        fmt.Sprintf("%s.$cmd", test_db),
 		Timestamp: time.Unix(1396456709, int64(472*time.Millisecond)),
 		CommandDoc: bson.D{
@@ -106,28 +107,32 @@ func TestExecution(t *testing.T) {
 		},
 		Type: Command,
 	}
-	err = exec.Execute(CanonicalizeOp(makeOp(famOp, make([]OpType, 0))))
+	normalizeOp(famOp)
+	err = exec.Execute(famOp)
 	ensure.Nil(t, err)
 
 	// check that the doc is modified
-	err = exec.Execute(CanonicalizeOp(makeOp(findOp, make([]OpType, 0))))
+	normalizeOp(findOp)
+	err = exec.Execute(findOp)
 	ensure.Nil(t, err)
 	findResult = exec.lastResult.(*[]Document)
 	ensure.DeepEqual(t, (*findResult)[0]["logType"].(string), "foobar")
 	findResult = nil
 
 	// Remove
-	removeOp := RawOp{
+	removeOp := &Op{
 		Ns:        testNs,
 		Timestamp: time.Unix(1396456709, int64(432*time.Millisecond)),
 		QueryDoc:  bson.D{{"_id", bson.ObjectIdHex("533c3d03c23fffd217678ee8")}},
 		Type:      Remove,
 	}
-	err = exec.Execute(CanonicalizeOp(makeOp(removeOp, make([]OpType, 0))))
+	normalizeOp(removeOp)
+	err = exec.Execute(removeOp)
 	ensure.Nil(t, err)
 
 	// check that the doc is gone
-	err = exec.Execute(CanonicalizeOp(makeOp(findOp, make([]OpType, 0))))
+	normalizeOp(findOp)
+	err = exec.Execute(findOp)
 	ensure.Nil(t, err)
 	findResult = exec.lastResult.(*[]Document)
 	ensure.DeepEqual(t, len(*findResult), 0)

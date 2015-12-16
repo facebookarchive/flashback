@@ -88,7 +88,7 @@ func NewFileByLineOpsReader(filename string, logger *Logger, opFilter string) (e
 }
 
 func (r *ByLineOpsReader) SkipOps(numSkipOps int) error {
-	var op RawOp
+	var op Op
 	for numSkipped := 0; numSkipped < numSkipOps; numSkipped++ {
 		if ok := r.src.Next(&op); !ok {
 			return r.src.Err()
@@ -103,7 +103,7 @@ func (r *ByLineOpsReader) SetStartTime(startTime int64) (int64, error) {
 	var numSkipped int64
 	searchTime := time.Unix(startTime/1000, startTime%1000*1000000)
 
-	var op RawOp
+	var op Op
 	for {
 		// The nature of this function is that it will discard the first op
 		if ok := r.src.Next(&op); !ok {
@@ -123,19 +123,40 @@ func (r *ByLineOpsReader) SetStartTime(startTime int64) (int64, error) {
 
 func (r *ByLineOpsReader) Next() *Op {
 	// we may need to skip certain type of ops
-	var rawOp RawOp
+	var op Op
 	for {
-		if ok := r.src.Next(&rawOp); !ok {
+		if ok := r.src.Next(&op); !ok {
 			return nil
 		}
 
 		r.opsRead++
-		op := makeOp(rawOp, r.opFilters)
-		if op == nil {
+
+		// filter out unwanted ops
+		if shouldFilterOp(&op, r.opFilters) {
 			continue
 		}
 
-		return op
+		normalizeOp(&op)
+
+		// Clean up empty keys on specific ops
+		emptyKeysToPrune := []string{"$set", "$unset"}
+		switch op.Type {
+		case Command:
+			if op.CommandDoc[0].Name == "findandmodify" {
+				for i := range op.CommandDoc {
+					if op.CommandDoc[i].Name == "update" {
+						if updateDoc, ok := op.CommandDoc[i].Value.(bson.D); ok {
+							updateDoc = pruneEmptyKeys(updateDoc, emptyKeysToPrune)
+							op.CommandDoc[i].Value = updateDoc
+						}
+					}
+				}
+			}
+		case Update:
+			op.UpdateDoc = pruneEmptyKeys(op.UpdateDoc, emptyKeysToPrune)
+		}
+
+		return &op
 	}
 }
 
@@ -156,93 +177,22 @@ func (r *ByLineOpsReader) Close() {
 	}
 }
 
-// Some operations are recorded with empty values for $set, $unset
-// When these are replayed against a mongo instance, they generate an error and do not execute
-// This method will detect and remove these empty blocks before the query is executed
-func PruneEmptyUpdateObj(doc Document, opType OpType) {
-	keysToPrune := []string{"$set", "$unset"}
-
-	if opType == Command {
-		// only do this for findandmodify
-		commandDoc := doc["command"].(bson.D)
-		// on properly ordered docs the first element should always be the command name
-		if commandDoc[0].Name != "findandmodify" {
-			return
-		}
-		commandDoc = pruneEmptyKeys(commandDoc, keysToPrune)
-		doc["command"] = commandDoc
-	} else if opType == Update {
-		updateDoc := doc["updateobj"].(bson.D)
-		updateDoc = pruneEmptyKeys(updateDoc, keysToPrune)
-		doc["updateobj"] = updateDoc
-	}
-}
-
-func pruneEmptyKeys(doc bson.D, keys []string) bson.D {
-	keyMap := map[string]struct{}{}
-	for _, key := range keys {
-		keyMap[key] = struct{}{}
-	}
-
-	prunedDoc := bson.D{}
-	for _, elem := range doc {
-		if _, ok := keyMap[elem.Name]; ok {
-			opValue := elem.Value.(bson.D)
-			if len(opValue) > 0 {
-				prunedDoc = append(prunedDoc, elem)
-			}
-		} else {
-			prunedDoc = append(prunedDoc, elem)
+func shouldFilterOp(op *Op, filters []OpType) bool {
+	for _, opFilter := range filters {
+		if op.Type == opFilter {
+			return true
 		}
 	}
 
-	return prunedDoc
+	return false
 }
 
-func makeOp(rawOp RawOp, opFilters []OpType) *Op {
-	parts := strings.SplitN(rawOp.Ns, ".", 2)
+func normalizeOp(op *Op) {
+	// populate db and collection name
+	parts := strings.SplitN(op.Ns, ".", 2)
 	dbName, collName := parts[0], parts[1]
-
-	if len(opFilters) != 0 {
-		filtered := false
-		for _, opFilter := range opFilters {
-			if rawOp.Type == opFilter {
-				filtered = true
-				break
-			}
-		}
-		if filtered == false {
-			return nil
-		}
-	}
-
-	var content Document
-	// we only handpick the fields that will be of useful for a given op type.
-	switch rawOp.Type {
-	case Insert:
-		content = Document{"o": rawOp.InsertDoc}
-	case Query:
-		content = Document{
-			"query":     rawOp.QueryDoc,
-			"ntoreturn": rawOp.NToReturn,
-			"ntoskip":   rawOp.NToSkip,
-		}
-	case Update:
-		content = Document{
-			"query":     rawOp.QueryDoc,
-			"updateobj": rawOp.UpdateDoc,
-		}
-
-		PruneEmptyUpdateObj(content, rawOp.Type)
-	case Command:
-		content = Document{"command": rawOp.CommandDoc}
-		PruneEmptyUpdateObj(content, rawOp.Type)
-	case Remove:
-		content = Document{"query": rawOp.QueryDoc}
-	default:
-		return nil
-	}
-	return &Op{dbName, collName, rawOp.Type, rawOp.Timestamp, content}
+	op.Database = dbName
+	op.Collection = collName
 }
 
 type CyclicOpsReader struct {
@@ -309,4 +259,28 @@ func (c *CyclicOpsReader) Err() error {
 
 func (c *CyclicOpsReader) Close() {
 	c.reader.Close()
+}
+
+// Some operations are recorded with empty values for $set, $unset
+// When these are replayed against a mongo instance, they generate an error and do not execute
+// This method will detect and remove these empty blocks before the query is executed
+func pruneEmptyKeys(doc bson.D, keys []string) bson.D {
+	keyMap := map[string]struct{}{}
+	for _, key := range keys {
+		keyMap[key] = struct{}{}
+	}
+
+	prunedDoc := bson.D{}
+	for _, elem := range doc {
+		if _, ok := keyMap[elem.Name]; ok {
+			opValue := elem.Value.(bson.D)
+			if len(opValue) > 0 {
+				prunedDoc = append(prunedDoc, elem)
+			}
+		} else {
+			prunedDoc = append(prunedDoc, elem)
+		}
+	}
+
+	return prunedDoc
 }

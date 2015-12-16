@@ -22,7 +22,7 @@ type mockOpsStreamReader struct {
 	opsByteReader io.Reader
 }
 
-func newMockOpsStreamReader(t *testing.T, ops []RawOp) mockOpsStreamReader {
+func newMockOpsStreamReader(t *testing.T, ops []Op) mockOpsStreamReader {
 	opsByteStream := make([]byte, 0)
 	for _, op := range ops {
 		bytes, err := bson.Marshal(op)
@@ -53,12 +53,11 @@ func CheckOpsReader(t *testing.T, loader OpsReader) {
 		// check the "ts" field
 		CheckTime(t, float64(startingTs+loader.OpsRead()), op.Timestamp)
 
-		// check the "o" field
-		var content = op.Content["o"].(bson.D)
+		// check the insert doc
 		// certain key exists
 		for i := 1; i <= 5; i++ {
 			logTypeKey := fmt.Sprintf("logType%d", i)
-			logType, ok := GetElem(content, logTypeKey)
+			logType, ok := GetElem(op.InsertDoc, logTypeKey)
 			if i != expectedOpsRead {
 				ensure.False(t, ok)
 				ensure.Nil(t, logType)
@@ -69,7 +68,7 @@ func CheckOpsReader(t *testing.T, loader OpsReader) {
 		}
 		// check the value for the shared key
 		message := fmt.Sprintf("m%d", expectedOpsRead)
-		actualMessage, ok := GetElem(content, "message")
+		actualMessage, ok := GetElem(op.InsertDoc, "message")
 		ensure.True(t, ok)
 		ensure.DeepEqual(t, actualMessage.(string), message)
 	}
@@ -109,18 +108,18 @@ func CheckSetStartTime(t *testing.T, loader OpsReader) {
 	ensure.DeepEqual(t, expectedOpsRead, 1)
 }
 
-func TestPruneEmptyUpdateObj(t *testing.T) {
+func TestPruneEmptyKeys(t *testing.T) {
 	t.Parallel()
 	// Check findAndModify and update structures to ensure nil $unsets are removed
-	testOps := []RawOp{
-		RawOp{
+	testOps := []Op{
+		Op{
 			Ns:        "foo.bar",
 			Timestamp: time.Unix(1396457119, int64(032*time.Millisecond)),
 			Type:      Update,
 			QueryDoc:  bson.D{{"_id", "foo"}},
 			UpdateDoc: bson.D{{"$set", bson.D{{"a", 1}}}, {"$unset", bson.D{}}},
 		},
-		RawOp{
+		Op{
 			Ns:        "foo.$cmd",
 			Timestamp: time.Unix(1396457119, int64(032*time.Millisecond)),
 			Type:      Command,
@@ -136,14 +135,13 @@ func TestPruneEmptyUpdateObj(t *testing.T) {
 	ensure.Nil(t, err)
 
 	for op := loader.Next(); op != nil; op = loader.Next() {
-		doc := op.Content
 		if op.Type == Command {
-			commandDoc := doc["command"].(bson.D)
-			_, found := GetElem(commandDoc, "$unset")
+			updateDoc, ok := GetElem(op.CommandDoc, "update")
+			ensure.True(t, ok)
+			_, found := GetElem(updateDoc.(bson.D), "$unset")
 			ensure.False(t, found)
 		} else if op.Type == Update {
-			updateDoc := doc["updateobj"].(bson.D)
-			_, found := GetElem(updateDoc, "$unset")
+			_, found := GetElem(op.UpdateDoc, "$unset")
 			ensure.False(t, found)
 		}
 	}
@@ -153,32 +151,32 @@ func TestFileByLineOpsReader(t *testing.T) {
 	t.Parallel()
 	logger, _ = NewLogger("", "")
 
-	testOps := []RawOp{
-		RawOp{
+	testOps := []Op{
+		Op{
 			Ns:        "db.coll",
 			Timestamp: time.Unix(1396456709, int64(421*time.Millisecond)),
 			Type:      Insert,
 			InsertDoc: bson.D{{"logType1", "warning"}, {"message", "m1"}},
 		},
-		RawOp{
+		Op{
 			Ns:        "db.coll",
 			Timestamp: time.Unix(1396456709, int64(422*time.Millisecond)),
 			Type:      Insert,
 			InsertDoc: bson.D{{"logType2", "warning"}, {"message", "m2"}},
 		},
-		RawOp{
+		Op{
 			Ns:        "db.coll",
 			Timestamp: time.Unix(1396456709, int64(423*time.Millisecond)),
 			Type:      Insert,
 			InsertDoc: bson.D{{"logType3", "warning"}, {"message", "m3"}},
 		},
-		RawOp{
+		Op{
 			Ns:        "db.coll",
 			Timestamp: time.Unix(1396456709, int64(424*time.Millisecond)),
 			Type:      Insert,
 			InsertDoc: bson.D{{"logType4", "warning"}, {"message", "m4"}},
 		},
-		RawOp{
+		Op{
 			Ns:        "db.coll",
 			Timestamp: time.Unix(1396456709, int64(425*time.Millisecond)),
 			Type:      Insert,
@@ -207,21 +205,21 @@ func TestFileByLineOpsReader(t *testing.T) {
 func TestOpFilter(t *testing.T) {
 	logger, _ = NewLogger("", "")
 
-	testOps := []RawOp{
-		RawOp{
+	testOps := []Op{
+		Op{
 			Ns:        "db.coll",
 			Timestamp: time.Unix(1396456709, int64(421*time.Millisecond)),
 			Type:      Insert,
 			InsertDoc: bson.D{{"logType1", "warning"}, {"message", "m1"}},
 		},
-		RawOp{
+		Op{
 			Ns:        "db.coll",
 			Timestamp: time.Unix(1396456709, int64(421*time.Millisecond)),
 			Type:      Update,
 			QueryDoc:  bson.D{{"_id", "foo"}},
 			UpdateDoc: bson.D{{"$set", bson.D{{"a", 1}}}},
 		},
-		RawOp{
+		Op{
 			Ns:        "db.$cmd",
 			Timestamp: time.Unix(1396456709, int64(421*time.Millisecond)),
 			Type:      Command,
@@ -245,9 +243,28 @@ func TestOpFilter(t *testing.T) {
 	}
 
 	test("", 3)
-	test("update", 1)
-	test("update,insert", 2)
-	test("update,insert,command", 3)
+	test("update", 2)
+	test("update,insert", 1)
+	test("update,insert,command", 0)
+}
+
+func TestShouldFilterOp(t *testing.T) {
+	t.Parallel()
+
+	ensure.True(t, shouldFilterOp(&Op{Type: Update}, []OpType{Update}))
+	ensure.True(t, shouldFilterOp(&Op{Type: Update}, []OpType{Update, Query}))
+	ensure.True(t, shouldFilterOp(&Op{Type: Query}, []OpType{Update, Query}))
+	ensure.False(t, shouldFilterOp(&Op{Type: Command}, []OpType{Update, Query}))
+	ensure.False(t, shouldFilterOp(&Op{Type: Command}, []OpType{}))
+}
+
+func TestNormalizeOp(t *testing.T) {
+	t.Parallel()
+
+	op := &Op{Ns: "foo.bar"}
+	normalizeOp(op)
+	ensure.DeepEqual(t, op.Database, "foo")
+	ensure.DeepEqual(t, op.Collection, "bar")
 }
 
 func CheckTime(t *testing.T, pythonTime float64, goTime time.Time) {
