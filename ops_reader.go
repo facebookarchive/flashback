@@ -9,9 +9,7 @@ import (
 
 	"gopkg.in/mgo.v2/bson"
 
-	"github.com/mongodb/mongo-tools/common/bsonutil" // requires go 1.4
 	"github.com/mongodb/mongo-tools/common/db"
-	"github.com/mongodb/mongo-tools/common/json"
 )
 
 // OpsReader Reads the ops from a source and present a interface for consumers
@@ -178,25 +176,6 @@ func PruneEmptyUpdateObj(doc Document, opType OpType) {
 		updateDoc = pruneEmptyKeys(updateDoc, keysToPrune)
 		doc["updateobj"] = updateDoc
 	}
-}
-
-// Convert a json string to a raw document
-func parseJson(jsonText string) (Document, error) {
-	rawObj := Document{}
-	err := json.Unmarshal([]byte(jsonText), &rawObj)
-
-	if err != nil {
-		return rawObj, err
-	}
-	err = normalizeObj(rawObj)
-	return rawObj, err
-}
-
-// Convert mongo extended json types from their strict JSON representation
-// to appropriate bson types
-// http://docs.mongodb.org/manual/reference/mongodb-extended-json/
-func normalizeObj(rawObj Document) error {
-	return bsonutil.ConvertJSONDocumentToBSON(rawObj)
 }
 
 func pruneEmptyKeys(doc bson.D, keys []string) bson.D {
