@@ -1,13 +1,13 @@
 """Globally shared common utilities functions/classes/variables"""
-import logging
 import config
+import constants
 import cPickle
-import time
+import logging
 import pymongo
 import string
 import threading
-import constants
-
+import time
+from bson.son import SON
 
 def _make_logger():
     """Create a new logger"""
@@ -58,7 +58,8 @@ def create_tailing_cursor(collection, criteria, oplog=False):
     of collections, etc.).
     """
     tailer = collection.find(
-        criteria, slave_okay=True, tailable=True, await_data=True)
+        criteria, slave_okay=True, tailable=True, await_data=True,
+        as_class=SON)
 
     # Set oplog_replay on the cursor, which allows queries against the oplog to run much faster
     if oplog:

@@ -356,8 +356,8 @@ func main() {
 					for _, ws := range workerStates {
 						timeOutput = fmt.Sprintf("%s %v (%s)", timeOutput, ws.exec.LastLatency(), ws.name)
 					}
-					logger.Infof(fmt.Sprintf("Slow op - %s\ntype:%s,database:%s,collection:%s\n\t%v",
-						timeOutput, op.Type, op.Database, op.Collection, op.Content))
+					logger.Infof(fmt.Sprintf("Slow op - %s\ntype:%s,database:%s,collection:%s",
+						timeOutput, op.Type, op.Database, op.Collection))
 				}
 			}
 

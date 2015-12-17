@@ -3,128 +3,154 @@ package flashback
 import (
 	"fmt"
 	"testing"
+	"time"
 
-	. "gopkg.in/check.v1"
 	"gopkg.in/mgo.v2"
+	"gopkg.in/mgo.v2/bson"
+
+	"github.com/facebookgo/ensure"
 )
 
-// Hook up gocheck into the "go test" runner.
-func TestOps(t *testing.T) {
-	TestingT(t)
-}
-
-type TestExecutorSuite struct{}
-
-var _ = Suite(&TestExecutorSuite{})
-
-func (s *TestExecutorSuite) TestExecution(c *C) {
+func TestExecution(t *testing.T) {
 	test_db := "test_db_for_executor"
 	test_collection := "c1"
 
 	session, err := mgo.Dial("localhost")
-	c.Assert(err, IsNil)
-	c.Assert(session, NotNil)
+	ensure.Nil(t, err)
+	ensure.NotNil(t, session)
 	defer session.Close()
 
 	err = session.DB(test_db).DropDatabase()
-	c.Assert(err, IsNil)
+	ensure.Nil(t, err)
+
+	testNs := fmt.Sprintf("%s.%s", test_db, test_collection)
 
 	// insertion
-	insertCmd := fmt.Sprintf(`{"ns": "%s.%s", "ts": {"$date": 1396456709427}, `+
-		`"o": {"logType": "console", "message": "start", "_id": `+
-		`{"$oid": "533c3d03c23fffd217678ee8"}, "timestamp": `+
-		`{"$date": 1396456707977}}, "op": "insert"}`,
-		test_db, test_collection)
-	cmd, err := parseJson(insertCmd)
-	c.Assert(err, IsNil)
-	op := CanonicalizeOp(makeOp(cmd, make([]string, 0)))
+	insertOp := &Op{
+		Ns:        testNs,
+		Timestamp: time.Unix(1396456709, int64(427*time.Millisecond)),
+		InsertDoc: bson.D{
+			{"logType", "console"},
+			{"message", "start"},
+			{"_id", bson.ObjectIdHex("533c3d03c23fffd217678ee8")},
+			{"timestamp", bson.D{{"$date", 1396456707977}}},
+		},
+		Type: Insert,
+	}
+	normalizeOp(insertOp)
 	logger, err := NewLogger("", "")
-	c.Assert(err, IsNil)
+	ensure.Nil(t, err)
 	exec := NewOpsExecutor(session, nil, logger)
-	err = exec.Execute(op)
-	c.Assert(err, IsNil)
+	err = exec.Execute(insertOp)
+	ensure.Nil(t, err)
 	coll := session.DB(test_db).C(test_collection)
 	count, err := coll.Count()
-	c.Assert(count, Equals, 1)
+	ensure.DeepEqual(t, count, 1)
 
 	// Find
-	findCmd := fmt.Sprintf(`{"ntoskip": 0, "ts": {"$date": 1396456709472}, `+
-		`"ntoreturn": 1, "query": {"$maxScan": 9000000, "$query": {"$or": `+
-		`[{"_id": {"$oid": "533c3d03c23fffd217678ee8"}}]}}, `+
-		`"ns": "%s.%s", "op": "query"}`, test_db, test_collection)
-	cmd, err = parseJson(findCmd)
-	c.Assert(err, IsNil)
-	findOp := CanonicalizeOp(makeOp(cmd, make([]string, 0)))
-
+	findOp := &Op{
+		Ns:        testNs,
+		Timestamp: time.Unix(1396456709, int64(472*time.Millisecond)),
+		QueryDoc: bson.D{
+			{
+				"$query", bson.D{
+					{"$or", []bson.D{bson.D{{"_id", bson.ObjectIdHex("533c3d03c23fffd217678ee8")}}}},
+				},
+			},
+			{"$maxScan", 9000000},
+		},
+		Type:      Query,
+		NToReturn: 1,
+		NToSkip:   0,
+	}
+	normalizeOp(findOp)
 	err = exec.Execute(findOp)
-	c.Assert(err, IsNil)
+	ensure.Nil(t, err)
 
 	findResult := exec.lastResult.(*[]Document)
-	c.Assert(len(*findResult), Equals, 1)
+	ensure.DeepEqual(t, len(*findResult), 1)
 	exec.lastResult = nil
 
 	// Update
-	updateCmd := fmt.Sprintf(`{"ts": {"$date": 1396456709472}, `+
-		`"query": {"_id": {"$oid": "533c3d03c23fffd217678ee8"}}, `+
-		`"updateobj": {"$set":{"logType": "hooo"}}, `+
-		`"ns": "%s.%s", "op": "update"}`, test_db, test_collection)
-	cmd, err = parseJson(updateCmd)
-	c.Assert(err, IsNil)
-	err = exec.Execute(CanonicalizeOp(makeOp(cmd, make([]string, 0))))
-	c.Assert(err, IsNil)
+	updateOp := &Op{
+		Ns:        testNs,
+		Timestamp: time.Unix(1396456709, int64(472*time.Millisecond)),
+		QueryDoc: bson.D{
+			{"_id", bson.ObjectIdHex("533c3d03c23fffd217678ee8")},
+		},
+		UpdateDoc: bson.D{
+			{"$set", bson.D{{"logType", "hooo"}}},
+		},
+		Type: Update,
+	}
 
+	normalizeOp(updateOp)
+	err = exec.Execute(updateOp)
+	ensure.Nil(t, err)
+
+	// Check that the document is updated
+	normalizeOp(findOp)
 	err = exec.Execute(findOp)
-	c.Assert(err, IsNil)
+	ensure.Nil(t, err)
 	findResult = exec.lastResult.(*[]Document)
-	c.Assert((*findResult)[0]["logType"].(string), Equals, "hooo")
+	ensure.DeepEqual(t, (*findResult)[0]["logType"].(string), "hooo")
 	findResult = nil
 
 	// findAndModify
-	famCmd := fmt.Sprintf(
-		`{"ts": {"$date": 1396456709472}, `+
-			`"ns": "%s.$cmd", "command": {"query": {"_id": {"$oid": "533c3d03c23fffd217678ee8"}}, `+
-			`"findandmodify": "%s", `+
-			`"update": {"$set": {"logType": "foobar"}}}, "op": "command"}`, test_db, test_collection)
-	cmd, err = parseJson(famCmd)
-	c.Assert(err, IsNil)
-	err = exec.Execute(CanonicalizeOp(makeOp(cmd, make([]string, 0))))
-	c.Assert(err, IsNil)
+	famOp := &Op{
+		Ns:        fmt.Sprintf("%s.$cmd", test_db),
+		Timestamp: time.Unix(1396456709, int64(472*time.Millisecond)),
+		CommandDoc: bson.D{
+			{"findandmodify", test_collection},
+			{"query", bson.D{{"_id", bson.ObjectIdHex("533c3d03c23fffd217678ee8")}}},
+			{"update", bson.D{{"$set", bson.D{{"logType", "foobar"}}}}},
+		},
+		Type: Command,
+	}
+	normalizeOp(famOp)
+	err = exec.Execute(famOp)
+	ensure.Nil(t, err)
 
+	// check that the doc is modified
+	normalizeOp(findOp)
 	err = exec.Execute(findOp)
-	c.Assert(err, IsNil)
+	ensure.Nil(t, err)
 	findResult = exec.lastResult.(*[]Document)
-	c.Assert((*findResult)[0]["logType"].(string), Equals, "foobar")
+	ensure.DeepEqual(t, (*findResult)[0]["logType"].(string), "foobar")
 	findResult = nil
 
 	// Remove
-	removeCmd := fmt.Sprintf(
-		`{"query": {"_id": {"$oid": "533c3d03c23fffd217678ee8"}}, `+
-			`"ns": "%s.%s", "ts": {"$date": 1396456709432}, "op": "remove"}`,
-		test_db, test_collection)
-	cmd, err = parseJson(removeCmd)
-	c.Assert(err, IsNil)
-	err = exec.Execute(CanonicalizeOp(makeOp(cmd, make([]string, 0))))
-	c.Assert(err, IsNil)
+	removeOp := &Op{
+		Ns:        testNs,
+		Timestamp: time.Unix(1396456709, int64(432*time.Millisecond)),
+		QueryDoc:  bson.D{{"_id", bson.ObjectIdHex("533c3d03c23fffd217678ee8")}},
+		Type:      Remove,
+	}
+	normalizeOp(removeOp)
+	err = exec.Execute(removeOp)
+	ensure.Nil(t, err)
 
+	// check that the doc is gone
+	normalizeOp(findOp)
 	err = exec.Execute(findOp)
-	c.Assert(err, IsNil)
+	ensure.Nil(t, err)
 	findResult = exec.lastResult.(*[]Document)
-	c.Assert(len(*findResult), Equals, 0)
+	ensure.DeepEqual(t, len(*findResult), 0)
 }
 
-func (s *TestExecutorSuite) TestSafeGetInt(c *C) {
+func TestSafeGetInt(t *testing.T) {
 	val, err := safeGetInt(int32(11))
-	c.Assert(err, IsNil)
-	c.Assert(val, Equals, int(11))
+	ensure.Nil(t, err)
+	ensure.DeepEqual(t, val, int(11))
 	val, err = safeGetInt(int64(11))
-	c.Assert(err, IsNil)
-	c.Assert(val, Equals, int(11))
+	ensure.Nil(t, err)
+	ensure.DeepEqual(t, val, int(11))
 	val, err = safeGetInt(float32(11))
-	c.Assert(err, IsNil)
-	c.Assert(val, Equals, int(11))
+	ensure.Nil(t, err)
+	ensure.DeepEqual(t, val, int(11))
 	val, err = safeGetInt(float64(11))
-	c.Assert(err, IsNil)
-	c.Assert(val, Equals, int(11))
+	ensure.Nil(t, err)
+	ensure.DeepEqual(t, val, int(11))
 	val, err = safeGetInt("a")
-	c.Assert(err, NotNil)
+	ensure.NotNil(t, err)
 }

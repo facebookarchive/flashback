@@ -1,21 +1,20 @@
 #!/usr/bin/python
 r""" Track the MongoDB activities by tailing oplog and profiler output"""
 
+import pymongo
+import config
+import cPickle
+import merge
+import os
+import Queue
+import time
+import signal
+import sys
+import utils
 from bson.timestamp import Timestamp
 from datetime import datetime
 from pymongo import MongoClient, uri_parser
-import pymongo
 from threading import Thread
-import config
-import cPickle
-import Queue
-import time
-import utils
-import signal
-import merge
-import os
-import sys
-
 
 def tail_to_queue(tailer, identifier, doc_queue, state, end_time,
                   check_duration_secs=1):
