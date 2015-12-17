@@ -41,6 +41,7 @@ func NewOpsExecutor(session *mgo.Session, statsChan chan OpStat, logger *Logger)
 		Remove:        e.execRemove,
 		Count:         e.execCount,
 		FindAndModify: e.execFindAndModify,
+		GetMore:       e.skipGetMore,
 	}
 	return e
 }
@@ -99,6 +100,11 @@ func (e *OpsExecutor) execFindAndModify(op *Op, coll *mgo.Collection) error {
 	change := mgo.Change{Update: update}
 	_, err := coll.Find(query).Apply(change, result)
 	return err
+}
+
+// currently not supported
+func (e *OpsExecutor) skipGetMore(op *Op, coll *mgo.Collection) error {
+	return nil
 }
 
 // We only support handful op types. This function helps us to process supported

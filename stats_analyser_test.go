@@ -1,6 +1,7 @@
 package flashback
 
 import (
+	"fmt"
 	"math"
 	"testing"
 	"time"
@@ -9,6 +10,9 @@ import (
 )
 
 func floatEquals(a float64, b float64, t *testing.T) {
+	if !(math.Abs(a-b)/b < 5e-2) {
+		fmt.Println(a, b)
+	}
 	ensure.True(t, math.Abs(a-b)/b < 5e-2)
 }
 
@@ -27,8 +31,8 @@ func TestBasics(t *testing.T) {
 	ensure.DeepEqual(t, status.IntervalOpsExecuted, int64(10*len(AllOpTypes)))
 	ensure.DeepEqual(t, status.OpsErrors, int64(0))
 	ensure.DeepEqual(t, status.IntervalOpsErrors, int64(0))
-	floatEquals(status.OpsPerSec, 600.0, t)
-	floatEquals(status.IntervalOpsPerSec, 600.0, t)
+	floatEquals(status.OpsPerSec, 689.0, t)
+	floatEquals(status.IntervalOpsPerSec, 689.0, t)
 
 	for _, opType := range AllOpTypes {
 		ensure.DeepEqual(t, status.Latencies[opType][P50], float64(4))
@@ -63,8 +67,8 @@ func TestBasics(t *testing.T) {
 	ensure.DeepEqual(t, status.IntervalOpsExecuted, int64(10*len(AllOpTypes))+1)
 	ensure.DeepEqual(t, status.OpsErrors, int64(1))
 	ensure.DeepEqual(t, status.IntervalOpsErrors, int64(1))
-	floatEquals(status.OpsPerSec, 400.0, t)
-	floatEquals(status.IntervalOpsPerSec, 300.0, t)
+	floatEquals(status.OpsPerSec, 458.0, t)
+	floatEquals(status.IntervalOpsPerSec, 352.0, t)
 
 	for _, opType := range AllOpTypes {
 		if opType == Insert {
