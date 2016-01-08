@@ -13,7 +13,7 @@ import (
 	"github.com/mongodb/mongo-tools/common/bsonutil"
 	"github.com/mongodb/mongo-tools/common/json"
 	"github.com/tmc/mongocaputils"
-	"github.com/tmc/mongocaputils/mongoproto"
+	"github.com/tmc/mongoproto"
 	"gopkg.in/mgo.v2/bson"
 )
 
