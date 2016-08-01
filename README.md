@@ -62,7 +62,8 @@ After configuration, please simply run `python record.py`.
 
 ### Prerequisites
 
-Go 1.4
+* Go 1.4
+* PyMongo 2.9.x (earlier 2.x versions may work. 3.x does NOT currently work)
 
 ### Installation
 
