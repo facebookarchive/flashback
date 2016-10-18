@@ -3,11 +3,13 @@ package main
 
 import (
 	"flag"
+	"time"
 	"fmt"
 	"log"
 	"os"
 	"runtime"
 	"strings"
+	"reflect"
 
 	"github.com/ParsePlatform/flashback"
 	"github.com/google/gopacket/pcap"
@@ -17,11 +19,76 @@ import (
 )
 
 var (
-	pcapFile        = flag.String("f", "-", "pcap file (or '-' for stdin)")
+	pcapFile	= flag.String("f", "-", "pcap file (or '-' for stdin)")
 	bsonFile	= flag.String("o", "flashback.bson", "bson output file, will be overwritten")
 	packetBufSize   = flag.Int("size", 1000, "size of packet buffer used for ordering within streams")
 	continueOnError = flag.Bool("continue_on_error", false, "Continue parsing lines if an error is encountered")
 )
+
+type Operation struct {
+	Ns		string			`bson:"ns"`
+	Timestamp	time.Time		`bson:"ts"`
+	NToSkip		int32			`bson:"ntoskip,omitempty"`
+	NToReturn	int32			`bson:"ntoreturn,omitempty"`
+	InsertDoc	bson.D			`bson:"o,omitempty"`
+	QueryDoc	bson.D			`bson:"query,omitempty"`
+	UpdateDoc	bson.D			`bson:"updateobj,omitempty"`
+	CommandDoc	bson.D			`bson:"command,omitempty"`
+	Type		flashback.OpType	`bson:"op"`
+}
+
+//func (fbOp *Operation) getOpNs(fullCollName string, query bson.D) string {
+//	if _, exists := flashback.GetElem(query, ""
+//
+//
+//}
+
+func parseQuery(opQuery []byte) (bson.D, error) {
+	var query bson.D
+	err := bson.Unmarshal(opQuery, &query)
+	return query, err
+}
+
+func (fbOp *Operation) handleCommand(query bson.D, f *os.File) error {
+	fbOp.Type = flashback.Command
+	fbOp.CommandDoc = query
+	return fbOp.writeOp(f)
+}
+
+func (fbOp *Operation) handleQuery(query bson.D, f *os.File) error {
+	fbOp.Type = flashback.Query
+	fbOp.QueryDoc = query
+	return fbOp.writeOp(f)
+}
+
+func (fbOp *Operation) handleInsert(query bson.D, f *os.File) error {
+	fbOp.Type = flashback.Insert
+	documents, _ := flashback.GetElem(query, "documents")
+	if (reflect.TypeOf(documents).Kind() == reflect.Slice) {
+		for _, document := range documents.([]interface{}) {
+			multiInsertOp := &Operation{
+				Ns: fbOp.Ns,
+				Timestamp: fbOp.Timestamp,
+				InsertDoc: document.(bson.D),
+				Type: fbOp.Type,
+			}
+			err := multiInsertOp.writeOp(f)
+			if err != nil {
+				return err
+			}
+		}
+	} else {
+		fbOp.InsertDoc = documents.(bson.D)
+	}
+	return fbOp.writeOp(f)
+}
+
+func (op *Operation) writeOp(f *os.File) error {
+//func writeOp(f *os.File, op *Operation) error {
+	opBson, err := bson.Marshal(op)
+	f.Write(opBson)
+	return err
+}
 
 func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
@@ -42,19 +109,19 @@ func main() {
 		f, err := os.Create(*bsonFile)
 		if err != nil {
 			logger.Println(err)
+			os.Exit(1)
 		}
 		defer f.Close()
 		for op := range m.Ops {
 			// TODO: add other op types
 			if opQuery, ok := op.Op.(*mongoproto.OpQuery); ok {
-				fbOp := &flashback.Op{
+				fbOp := &Operation{
 					Ns: opQuery.FullCollectionName,
-					NToSkip: int64(opQuery.NumberToSkip),
-					NToReturn: int64(opQuery.NumberToReturn),
+					NToSkip: opQuery.NumberToSkip,
+					NToReturn: opQuery.NumberToReturn,
 					Timestamp: op.Seen,
 				}
-				var query bson.D
-				err := bson.Unmarshal(opQuery.Query, &query)
+				query, err := parseQuery(opQuery.Query)
 				if err != nil {
 					logger.Println(err)
 					if !*continueOnError {
@@ -62,20 +129,27 @@ func main() {
 					}
 				}
 				if strings.HasSuffix(opQuery.FullCollectionName, ".$cmd") {
-					fbOp.Type = flashback.Command
-					fbOp.CommandDoc = query
+					collection, exists := flashback.GetElem(query, "insert")
+					if exists == true {
+						fbOp.Ns = strings.Replace(fbOp.Ns, "$cmd", collection.(string), 1)
+						err = fbOp.handleInsert(query, f)
+					} else {
+						err = fbOp.handleCommand(query, f)
+					}
 				} else {
-					fbOp.Type = flashback.Query
-					fbOp.QueryDoc = query
+					_, exists := flashback.GetElem(query, "insert")
+					if exists == true {
+						err = fbOp.handleInsert(query, f)
+					} else {
+						err = fbOp.handleQuery(query, f)
+					}
 				}
-				fbOpStr, err := bson.Marshal(fbOp)
 				if err != nil {
 					logger.Println(err)
 					if !*continueOnError {
 						os.Exit(1)
 					}
 				}
-				f.Write(fbOpStr)
 			}
 		}
 	}()
