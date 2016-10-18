@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"time"
 	"runtime"
 	"strings"
 
@@ -14,22 +13,15 @@ import (
 	"github.com/tmc/mongocaputils"
 	"github.com/tmc/mongoproto"
 	"gopkg.in/mgo.v2/bson"
+	"github.com/ParsePlatform/flashback"
 )
 
 var (
 	pcapFile        = flag.String("f", "-", "pcap file (or '-' for stdin)")
-	bsonFile	= flag.String("o", "flashback.bson", "bson output file")
+	bsonFile	= flag.String("o", "flashback.bson", "bson output file, will be overwritten")
 	packetBufSize   = flag.Int("size", 1000, "size of packet buffer used for ordering within streams")
 	continueOnError = flag.Bool("continue_on_error", false, "Continue parsing lines if an error is encountered")
 )
-
-type FlashbackOperation struct {
-	Command	interface{}	`bson:"command,omitempty"`
-	Query	interface{}	`bson:"query,omitempty"`
-	Ns	string		`bson:"ns"`
-	Ts	time.Time	`bson:"ts"`
-	Op	string		`bons:"op"`
-}
 
 func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
@@ -55,11 +47,13 @@ func main() {
 		for op := range m.Ops {
 			// TODO: add other op types
 			if opQuery, ok := op.Op.(*mongoproto.OpQuery); ok {
-				fbOp := &FlashbackOperation{
+				fbOp := &flashback.Op{
 					Ns: opQuery.FullCollectionName,
-					Ts: op.Seen,
+					NToSkip: int64(opQuery.NumberToSkip),
+					NToReturn: int64(opQuery.NumberToReturn),
+					Timestamp: op.Seen,
 				}
-				var query interface{}
+				var query bson.D
 				err := bson.Unmarshal(opQuery.Query, &query)
 				if err != nil {
 					logger.Println(err)
@@ -68,11 +62,11 @@ func main() {
 					}
 				}
 				if strings.HasSuffix(opQuery.FullCollectionName, ".$cmd") {
-					fbOp.Op = "command"
-					fbOp.Command = query
+					fbOp.Type = "command"
+					fbOp.CommandDoc = query
 				} else {
-					fbOp.Op = "query"
-					fbOp.Query = query
+					fbOp.Type = "query"
+					fbOp.QueryDoc = query
 				}
 				fbOpStr, err := bson.Marshal(fbOp)
 				if err != nil {
