@@ -6,12 +6,11 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 	"runtime"
 	"strings"
 
 	"github.com/google/gopacket/pcap"
-	"github.com/mongodb/mongo-tools/common/bsonutil"
-	"github.com/mongodb/mongo-tools/common/json"
 	"github.com/tmc/mongocaputils"
 	"github.com/tmc/mongoproto"
 	"gopkg.in/mgo.v2/bson"
@@ -19,23 +18,17 @@ import (
 
 var (
 	pcapFile        = flag.String("f", "-", "pcap file (or '-' for stdin)")
+	bsonFile	= flag.String("o", "flashback.bson", "bson output file")
 	packetBufSize   = flag.Int("size", 1000, "size of packet buffer used for ordering within streams")
 	continueOnError = flag.Bool("continue_on_error", false, "Continue parsing lines if an error is encountered")
 )
 
-// Converts the raw BSON doc in op.Query to extended JSON
-func rawBSONToJSON(rawBSON []byte) (interface{}, error) {
-	// Use bson.D to preserve order when unmarshalling
-	// http://godoc.org/github.com/mongodb/mongo-tools/common/bsonutil#MarshalD
-	var data bson.D
-	if err := bson.Unmarshal(rawBSON, &data); err != nil {
-		return nil, err
-	}
-	bsonAsJSON, err := bsonutil.ConvertBSONValueToJSON(data)
-	if err != nil {
-		return nil, err
-	}
-	return bsonAsJSON, nil
+type FlashbackOperation struct {
+	Command	interface{}	`bson:"command,omitempty"`
+	Query	interface{}	`bson:"query,omitempty"`
+	Ns	string		`bson:"ns"`
+	Ts	time.Time	`bson:"ts"`
+	Op	string		`bons:"op"`
 }
 
 func main() {
@@ -54,15 +47,20 @@ func main() {
 	ch := make(chan struct{})
 	go func() {
 		defer close(ch)
+		f, err := os.Create(*bsonFile)
+		if err != nil {
+			logger.Println(err)
+		}
+		defer f.Close()
 		for op := range m.Ops {
 			// TODO: add other op types
 			if opQuery, ok := op.Op.(*mongoproto.OpQuery); ok {
-				fbOp := map[string]interface{}{}
-				fbOp["ns"] = opQuery.FullCollectionName
-				fbOp["ntoskip"] = opQuery.NumberToSkip
-				fbOp["ntoreturn"] = opQuery.NumberToReturn
-				fbOp["ts"] = json.Date(op.Seen.Unix())
-				query, err := rawBSONToJSON(opQuery.Query)
+				fbOp := &FlashbackOperation{
+					Ns: opQuery.FullCollectionName,
+					Ts: op.Seen,
+				}
+				var query interface{}
+				err := bson.Unmarshal(opQuery.Query, &query)
 				if err != nil {
 					logger.Println(err)
 					if !*continueOnError {
@@ -70,20 +68,20 @@ func main() {
 					}
 				}
 				if strings.HasSuffix(opQuery.FullCollectionName, ".$cmd") {
-					fbOp["op"] = "command"
-					fbOp["command"] = query
+					fbOp.Op = "command"
+					fbOp.Command = query
 				} else {
-					fbOp["op"] = "query"
-					fbOp["query"] = query
+					fbOp.Op = "query"
+					fbOp.Query = query
 				}
-				fbOpStr, err := json.Marshal(fbOp)
+				fbOpStr, err := bson.Marshal(fbOp)
 				if err != nil {
 					logger.Println(err)
 					if !*continueOnError {
 						os.Exit(1)
 					}
 				}
-				fmt.Println(string(fbOpStr))
+				f.Write(fbOpStr)
 			}
 		}
 	}()
