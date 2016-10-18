@@ -9,11 +9,11 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/ParsePlatform/flashback"
 	"github.com/google/gopacket/pcap"
 	"github.com/tmc/mongocaputils"
 	"github.com/tmc/mongoproto"
 	"gopkg.in/mgo.v2/bson"
-	"github.com/ParsePlatform/flashback"
 )
 
 var (
@@ -62,10 +62,10 @@ func main() {
 					}
 				}
 				if strings.HasSuffix(opQuery.FullCollectionName, ".$cmd") {
-					fbOp.Type = "command"
+					fbOp.Type = flashback.Command
 					fbOp.CommandDoc = query
 				} else {
-					fbOp.Type = "query"
+					fbOp.Type = flashback.Query
 					fbOp.QueryDoc = query
 				}
 				fbOpStr, err := bson.Marshal(fbOp)
