@@ -90,8 +90,8 @@ pcap_converter is an experimental way to build a recorded ops file from a pcap o
 
 ```sh
 $ go get github.com/ParsePlatform/flashback/cmd/pcap_converter
-$ tcpdump -i lo0 -w some_mongo_cap.pcap 'dst port 27017'
-$ pcap_converter -f some_mongo_cap.pcap > ops_filename.json
+$ tcpdump -i lo0 -w some_mongo_cap.pcap 'tcp and dst port 27017'
+$ pcap_converter -f some_mongo_cap.pcap -o ops_filename.bson
 ```
 
 
