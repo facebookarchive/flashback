@@ -62,6 +62,8 @@ func (fbOp *Operation) handleQuery(query bson.D, f *os.File) error {
 }
 
 func (fbOp *Operation) handleInsert(query bson.D, f *os.File) error {
+	var err error
+	inserts := []*Operation{}
 	fbOp.Type = flashback.Insert
 	documents, _ := flashback.GetElem(query, "documents")
 	if (reflect.TypeOf(documents).Kind() == reflect.Slice) {
@@ -72,15 +74,19 @@ func (fbOp *Operation) handleInsert(query bson.D, f *os.File) error {
 				InsertDoc: document.(bson.D),
 				Type: fbOp.Type,
 			}
-			err := multiInsertOp.writeOp(f)
-			if err != nil {
-				return err
-			}
+			inserts = append(inserts, multiInsertOp)
 		}
 	} else {
 		fbOp.InsertDoc = documents.(bson.D)
+		inserts = append(inserts, fbOp)
 	}
-	return fbOp.writeOp(f)
+	for _, insert := range inserts {
+		err = insert.writeOp(f)
+		if err != nil {
+			return err
+		}
+	}
+	return err 
 }
 
 func (op *Operation) writeOp(f *os.File) error {
@@ -128,6 +134,7 @@ func main() {
 						os.Exit(1)
 					}
 				}
+				fmt.Println(opQuery)
 				if strings.HasSuffix(opQuery.FullCollectionName, ".$cmd") {
 					collection, exists := flashback.GetElem(query, "insert")
 					if exists == true {
