@@ -74,15 +74,15 @@ func (fbOp *Operation) handleInsert(query bson.D, f *os.File) error {
 			fbOp.InsertDoc = documents.(bson.D)
 			inserts = append(inserts, fbOp)
 		}
-		for _, insert := range inserts {
-			err = insert.writeOp(f)
-			if err != nil {
-				return err
-			}
-		}
 	} else {
 		fbOp.InsertDoc = query
-		err = fbOp.writeOp(f)
+		inserts = append(inserts, fbOp)
+	}
+	for _, insert := range inserts {
+		err = insert.writeOp(f)
+		if err != nil {
+			return err
+		}
 	}
 	return err 
 }
