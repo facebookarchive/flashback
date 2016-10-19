@@ -81,22 +81,23 @@ func (fbOp *Operation) handleQuery(opQuery *mongoproto.OpQuery, f *os.File) erro
 	}
 }
 
-func (fbOp *Operation) handleInsertDocument(document bson.D, opInsert *mongoproto.OpInsert, f *os.File) error {
+func (fbOp *Operation) handleInsertDocument(ns string, document bson.D, f *os.File) error {
+	fbOp.Ns = ns
 	fbOp.Type = flashback.Insert
-	fbOp.Ns = opInsert.FullCollectionName
 	fbOp.InsertDoc = document
 	return fbOp.writeOp(f)
 }
 
 func (fbOp *Operation) handleInsert(opInsert *mongoproto.OpInsert, f *os.File) error {
 	var err error
+	fbOp.Ns = opInsert.FullCollectionName
 	if opInsert.Documents != nil {
 		for _, document := range opInsert.Documents {
-			query, err := parseQuery(document)
+			insert, err := parseQuery(document)
 			if err != nil {
 				return err
 			}
-			err = fbOp.handleInsertDocument(query, opInsert, f)
+			err = fbOp.handleInsertDocument(fbOp.Ns, insert, f)
 			if err != nil {
 				return err
 			}
@@ -107,6 +108,7 @@ func (fbOp *Operation) handleInsert(opInsert *mongoproto.OpInsert, f *os.File) e
 
 func (fbOp *Operation) handleInsertFromQuery(opQuery *mongoproto.OpQuery, f *os.File) error {
 	var inserts []bson.D
+	fbOp.Ns = opQuery.FullCollectionName
 	query, err := parseQuery(opQuery.Query)
 	if err != nil {
 		return err
@@ -115,12 +117,6 @@ func (fbOp *Operation) handleInsertFromQuery(opQuery *mongoproto.OpQuery, f *os.
 	if exists == true {
 		if (reflect.TypeOf(documents).Kind() == reflect.Slice) {
 			for _, document := range documents.([]interface{}) {
-				//multiInsertOp := &Operation{
-				//	Ns: fbOp.Ns,
-				//	Timestamp: fbOp.Timestamp,
-				//	Type: fbOp.Type,
-				//	InsertDoc: document.(bson.D),
-				//}
 				inserts = append(inserts, document.(bson.D))
 			}
 		} else {
@@ -128,10 +124,9 @@ func (fbOp *Operation) handleInsertFromQuery(opQuery *mongoproto.OpQuery, f *os.
 		}
 	} 
 	for _, insert := range inserts {
-		fbOp.InsertDoc = insert
-		err = fbOp.writeOp(f)
+		err = fbOp.handleInsertDocument(fbOp.Ns, insert, f)
 	}
-	return err 
+	return fbOp.writeOp(f) 
 }
 
 func (fbOp *Operation) handleDelete(opDelete *mongoproto.OpDelete, f *os.File) error {
