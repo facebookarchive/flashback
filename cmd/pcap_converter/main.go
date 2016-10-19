@@ -4,7 +4,6 @@ package main
 import (
 	"flag"
 	"time"
-	"fmt"
 	"log"
 	"os"
 	"runtime"
@@ -37,12 +36,6 @@ type Operation struct {
 	Type		flashback.OpType	`bson:"op"`
 }
 
-//func (fbOp *Operation) getOpNs(fullCollName string, query bson.D) string {
-//	if _, exists := flashback.GetElem(query, ""
-//
-//
-//}
-
 func parseQuery(opQuery []byte) (bson.D, error) {
 	var query bson.D
 	err := bson.Unmarshal(opQuery, &query)
@@ -65,32 +58,36 @@ func (fbOp *Operation) handleInsert(query bson.D, f *os.File) error {
 	var err error
 	inserts := []*Operation{}
 	fbOp.Type = flashback.Insert
-	documents, _ := flashback.GetElem(query, "documents")
-	if (reflect.TypeOf(documents).Kind() == reflect.Slice) {
-		for _, document := range documents.([]interface{}) {
-			multiInsertOp := &Operation{
-				Ns: fbOp.Ns,
-				Timestamp: fbOp.Timestamp,
-				InsertDoc: document.(bson.D),
-				Type: fbOp.Type,
+	documents, exists := flashback.GetElem(query, "documents")
+	if exists == true {
+		if (reflect.TypeOf(documents).Kind() == reflect.Slice) {
+			for _, document := range documents.([]interface{}) {
+				multiInsertOp := &Operation{
+					Ns: fbOp.Ns,
+					Timestamp: fbOp.Timestamp,
+					InsertDoc: document.(bson.D),
+					Type: fbOp.Type,
+				}
+				inserts = append(inserts, multiInsertOp)
 			}
-			inserts = append(inserts, multiInsertOp)
+		} else {
+			fbOp.InsertDoc = documents.(bson.D)
+			inserts = append(inserts, fbOp)
+		}
+		for _, insert := range inserts {
+			err = insert.writeOp(f)
+			if err != nil {
+				return err
+			}
 		}
 	} else {
-		fbOp.InsertDoc = documents.(bson.D)
-		inserts = append(inserts, fbOp)
-	}
-	for _, insert := range inserts {
-		err = insert.writeOp(f)
-		if err != nil {
-			return err
-		}
+		fbOp.InsertDoc = query
+		err = fbOp.writeOp(f)
 	}
 	return err 
 }
 
 func (op *Operation) writeOp(f *os.File) error {
-//func writeOp(f *os.File, op *Operation) error {
 	opBson, err := bson.Marshal(op)
 	f.Write(opBson)
 	return err
@@ -103,7 +100,7 @@ func main() {
 
 	pcap, err := pcap.OpenOffline(*pcapFile)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "error opening pcap file:", err)
+		logger.Println(os.Stderr, "error opening pcap file:", err)
 		os.Exit(1)
 	}
 	h := mongocaputils.NewPacketHandler(pcap)
@@ -119,8 +116,24 @@ func main() {
 		}
 		defer f.Close()
 		for op := range m.Ops {
-			// TODO: add other op types
-			if opQuery, ok := op.Op.(*mongoproto.OpQuery); ok {
+			if _, ok := op.Op.(*mongoproto.OpUnknown); ok {
+				logger.Println("Found unknown operation")
+			} else if opInsert, ok := op.Op.(*mongoproto.OpInsert); ok {
+				for _, document := range opInsert.Documents {
+					query, err := parseQuery(document)
+					if err != nil {
+						logger.Println(err)
+						if !*continueOnError {
+							os.Exit(1)
+						}
+					}
+					fbOp := &Operation{
+						Ns: opInsert.FullCollectionName,
+						Timestamp: op.Seen,
+					}
+					fbOp.handleInsert(query, f)
+				}
+			} else if opQuery, ok := op.Op.(*mongoproto.OpQuery); ok {
 				fbOp := &Operation{
 					Ns: opQuery.FullCollectionName,
 					NToSkip: opQuery.NumberToSkip,
@@ -134,8 +147,8 @@ func main() {
 						os.Exit(1)
 					}
 				}
-				fmt.Println(opQuery)
 				if strings.HasSuffix(opQuery.FullCollectionName, ".$cmd") {
+					// sometimes mongoproto returns inserts as 'commands'
 					collection, exists := flashback.GetElem(query, "insert")
 					if exists == true {
 						fbOp.Ns = strings.Replace(fbOp.Ns, "$cmd", collection.(string), 1)
@@ -162,7 +175,7 @@ func main() {
 	}()
 
 	if err := h.Handle(m, -1); err != nil {
-		fmt.Fprintln(os.Stderr, "pcap_converter: error handling packet stream:", err)
+		logger.Println(os.Stderr, "pcap_converter: error handling packet stream:", err)
 	}
 	<-ch
 }
