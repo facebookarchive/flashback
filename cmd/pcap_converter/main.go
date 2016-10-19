@@ -2,6 +2,7 @@
 package main
 
 import (
+	//"fmt"
 	"flag"
 	"time"
 	"log"
@@ -22,6 +23,7 @@ var (
 	bsonFile	= flag.String("o", "flashback.bson", "bson output file, will be overwritten")
 	packetBufSize   = flag.Int("size", 1000, "size of packet buffer used for ordering within streams")
 	continueOnError = flag.Bool("continue_on_error", false, "Continue parsing lines if an error is encountered")
+	debug           = flag.Bool("debug", false, "Print debug-level output")
 )
 
 type Operation struct {
@@ -42,49 +44,105 @@ func parseQuery(opQuery []byte) (bson.D, error) {
 	return query, err
 }
 
-func (fbOp *Operation) handleCommand(query bson.D, f *os.File) error {
-	fbOp.Type = flashback.Command
-	fbOp.CommandDoc = query
-	return fbOp.writeOp(f)
-}
-
-func (fbOp *Operation) handleQuery(query bson.D, f *os.File) error {
-	fbOp.Type = flashback.Query
-	fbOp.QueryDoc = query
-	return fbOp.writeOp(f)
-}
-
-func (fbOp *Operation) handleInsert(query bson.D, f *os.File) error {
+func (fbOp *Operation) handleCommand(opCommand *mongoproto.OpQuery, f *os.File) error {
 	var err error
-	inserts := []*Operation{}
+	fbOp.Type = flashback.Command
+	fbOp.CommandDoc, err = parseQuery(opCommand.Query)
+	if err != nil {
+		return err
+	}
+	return fbOp.writeOp(f)
+}
+
+func (fbOp *Operation) handleQuery(opQuery *mongoproto.OpQuery, f *os.File) error {
+	var err error
+	fbOp.Ns = opQuery.FullCollectionName
+	fbOp.Type = flashback.Query
+	fbOp.QueryDoc, err = parseQuery(opQuery.Query)
+	if err != nil {
+		return err
+	}
+	if strings.HasSuffix(opQuery.FullCollectionName, ".$cmd") {
+		// sometimes mongoproto returns inserts as 'commands'
+		collection, exists := flashback.GetElem(fbOp.QueryDoc, "insert")
+		if exists == true {
+			opQuery.FullCollectionName = strings.Replace(opQuery.FullCollectionName, "$cmd", collection.(string), 1)
+			return fbOp.handleInsertFromQuery(opQuery, f)
+		} else {
+			return fbOp.handleCommand(opQuery, f)
+		}
+	} else {
+		//_, exists := flashback.GetElem(fbOp.QueryDoc, "insert")
+		//if exists == true {
+		//	return fbOp.handleInsertFromQuery(opQuery, f)
+		//} else {
+		return fbOp.writeOp(f)
+		//}
+	}
+}
+
+func (fbOp *Operation) handleInsertDocument(document bson.D, opInsert *mongoproto.OpInsert, f *os.File) error {
 	fbOp.Type = flashback.Insert
+	fbOp.Ns = opInsert.FullCollectionName
+	fbOp.InsertDoc = document
+	return fbOp.writeOp(f)
+}
+
+func (fbOp *Operation) handleInsert(opInsert *mongoproto.OpInsert, f *os.File) error {
+	var err error
+	if opInsert.Documents != nil {
+		for _, document := range opInsert.Documents {
+			query, err := parseQuery(document)
+			if err != nil {
+				return err
+			}
+			err = fbOp.handleInsertDocument(query, opInsert, f)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return err
+}
+
+func (fbOp *Operation) handleInsertFromQuery(opQuery *mongoproto.OpQuery, f *os.File) error {
+	var inserts []bson.D
+	query, err := parseQuery(opQuery.Query)
+	if err != nil {
+		return err
+	}
 	documents, exists := flashback.GetElem(query, "documents")
 	if exists == true {
 		if (reflect.TypeOf(documents).Kind() == reflect.Slice) {
 			for _, document := range documents.([]interface{}) {
-				multiInsertOp := &Operation{
-					Ns: fbOp.Ns,
-					Timestamp: fbOp.Timestamp,
-					InsertDoc: document.(bson.D),
-					Type: fbOp.Type,
-				}
-				inserts = append(inserts, multiInsertOp)
+				//multiInsertOp := &Operation{
+				//	Ns: fbOp.Ns,
+				//	Timestamp: fbOp.Timestamp,
+				//	Type: fbOp.Type,
+				//	InsertDoc: document.(bson.D),
+				//}
+				inserts = append(inserts, document.(bson.D))
 			}
 		} else {
-			fbOp.InsertDoc = documents.(bson.D)
-			inserts = append(inserts, fbOp)
+			inserts = append(inserts, documents.(bson.D))
 		}
-	} else {
-		fbOp.InsertDoc = query
-		inserts = append(inserts, fbOp)
-	}
+	} 
 	for _, insert := range inserts {
-		err = insert.writeOp(f)
-		if err != nil {
-			return err
-		}
+		fbOp.InsertDoc = insert
+		err = fbOp.writeOp(f)
 	}
 	return err 
+}
+
+func (fbOp *Operation) handleDelete(opDelete *mongoproto.OpDelete, f *os.File) error {
+	var err error
+	fbOp.Type = flashback.Remove
+	fbOp.Ns = opDelete.FullCollectionName
+	fbOp.QueryDoc, err = parseQuery(opDelete.Selector)
+	if err != nil {
+		return err
+	}
+	return fbOp.writeOp(f)
 }
 
 func (op *Operation) writeOp(f *os.File) error {
@@ -116,59 +174,27 @@ func main() {
 		}
 		defer f.Close()
 		for op := range m.Ops {
-			if _, ok := op.Op.(*mongoproto.OpUnknown); ok {
-				logger.Println("Found unknown operation")
+			// todo: fix mongoproto.OpUpdate and mongoproto.OpDelete so they can be added
+			var err error
+			fbOp := &Operation{
+				Timestamp: op.Seen,
+			}
+			if *debug == true {
+				if _, ok := op.Op.(*mongoproto.OpUnknown); ok {
+					logger.Println("Found unknown operation")
+				}
+			}
+			if opDelete, ok := op.Op.(*mongoproto.OpDelete); ok {
+				err = fbOp.handleDelete(opDelete, f)
 			} else if opInsert, ok := op.Op.(*mongoproto.OpInsert); ok {
-				for _, document := range opInsert.Documents {
-					query, err := parseQuery(document)
-					if err != nil {
-						logger.Println(err)
-						if !*continueOnError {
-							os.Exit(1)
-						}
-					}
-					fbOp := &Operation{
-						Ns: opInsert.FullCollectionName,
-						Timestamp: op.Seen,
-					}
-					fbOp.handleInsert(query, f)
-				}
+				err = fbOp.handleInsert(opInsert, f)
 			} else if opQuery, ok := op.Op.(*mongoproto.OpQuery); ok {
-				fbOp := &Operation{
-					Ns: opQuery.FullCollectionName,
-					NToSkip: opQuery.NumberToSkip,
-					NToReturn: opQuery.NumberToReturn,
-					Timestamp: op.Seen,
-				}
-				query, err := parseQuery(opQuery.Query)
-				if err != nil {
-					logger.Println(err)
-					if !*continueOnError {
-						os.Exit(1)
-					}
-				}
-				if strings.HasSuffix(opQuery.FullCollectionName, ".$cmd") {
-					// sometimes mongoproto returns inserts as 'commands'
-					collection, exists := flashback.GetElem(query, "insert")
-					if exists == true {
-						fbOp.Ns = strings.Replace(fbOp.Ns, "$cmd", collection.(string), 1)
-						err = fbOp.handleInsert(query, f)
-					} else {
-						err = fbOp.handleCommand(query, f)
-					}
-				} else {
-					_, exists := flashback.GetElem(query, "insert")
-					if exists == true {
-						err = fbOp.handleInsert(query, f)
-					} else {
-						err = fbOp.handleQuery(query, f)
-					}
-				}
-				if err != nil {
-					logger.Println(err)
-					if !*continueOnError {
-						os.Exit(1)
-					}
+				err = fbOp.handleQuery(opQuery, f)
+			}
+			if err != nil {
+				logger.Println(err)
+				if !*continueOnError {
+					os.Exit(1)
 				}
 			}
 		}
