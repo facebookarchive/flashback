@@ -2,7 +2,7 @@
 package main
 
 import (
-	//"fmt"
+	"fmt"
 	"flag"
 	"time"
 	"log"
@@ -149,7 +149,7 @@ func main() {
 
 	pcap, err := pcap.OpenOffline(*pcapFile)
 	if err != nil {
-		logger.Println(os.Stderr, "error opening pcap file:", err)
+		fmt.Println(os.Stderr, "error opening pcap file:", err)
 		os.Exit(1)
 	}
 	h := mongocaputils.NewPacketHandler(pcap)
@@ -170,17 +170,18 @@ func main() {
 			fbOp := &Operation{
 				Timestamp: op.Seen,
 			}
-			if *debug == true {
-				if _, ok := op.Op.(*mongoproto.OpUnknown); ok {
-					logger.Println("Found unknown operation")
-				}
-			}
 			if opDelete, ok := op.Op.(*mongoproto.OpDelete); ok {
 				err = fbOp.handleDelete(opDelete, f)
 			} else if opInsert, ok := op.Op.(*mongoproto.OpInsert); ok {
 				err = fbOp.handleInsert(opInsert, f)
 			} else if opQuery, ok := op.Op.(*mongoproto.OpQuery); ok {
 				err = fbOp.handleQuery(opQuery, f)
+			} else if *debug == true {
+				if _, ok := op.Op.(*mongoproto.OpUnknown); ok {
+					fmt.Println("Found mongoproto.OpUnknown operation: ", op)
+				} else {
+					fmt.Println("No known type for operation: ", op)
+				}
 			}
 			if err != nil {
 				logger.Println(err)
@@ -192,7 +193,7 @@ func main() {
 	}()
 
 	if err := h.Handle(m, -1); err != nil {
-		logger.Println(os.Stderr, "pcap_converter: error handling packet stream:", err)
+		fmt.Println(os.Stderr, "pcap_converter: error handling packet stream:", err)
 	}
 	<-ch
 }
