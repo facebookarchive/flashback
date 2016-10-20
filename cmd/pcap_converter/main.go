@@ -58,7 +58,7 @@ func (fbOp *Operation) handleQuery(opQuery *mongoproto.OpQuery, f *os.File) erro
 	var err error
 	fbOp.Ns = opQuery.FullCollectionName
 	fbOp.Type = flashback.Query
-	fbOp.QueryDoc, err = parseQuery(opQuery.Query)
+	query, err := parseQuery(opQuery.Query)
 	if err != nil {
 		return err
 	}
@@ -72,12 +72,8 @@ func (fbOp *Operation) handleQuery(opQuery *mongoproto.OpQuery, f *os.File) erro
 			return fbOp.handleCommand(opQuery, f)
 		}
 	} else {
-		//_, exists := flashback.GetElem(fbOp.QueryDoc, "insert")
-		//if exists == true {
-		//	return fbOp.handleInsertFromQuery(opQuery, f)
-		//} else {
+		fbOp.QueryDoc = query
 		return fbOp.writeOp(f)
-		//}
 	}
 }
 
