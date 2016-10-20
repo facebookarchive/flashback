@@ -149,7 +149,7 @@ func main() {
 
 	pcap, err := pcap.OpenOffline(*pcapFile)
 	if err != nil {
-		fmt.Println(os.Stderr, "error opening pcap file:", err)
+		fmt.Fprintln(os.Stderr, "error opening pcap file:", err)
 		os.Exit(1)
 	}
 	h := mongocaputils.NewPacketHandler(pcap)
@@ -193,7 +193,7 @@ func main() {
 	}()
 
 	if err := h.Handle(m, -1); err != nil {
-		fmt.Println(os.Stderr, "pcap_converter: error handling packet stream:", err)
+		fmt.Fprintln(os.Stderr, "pcap_converter: error handling packet stream:", err)
 	}
 	<-ch
 }
