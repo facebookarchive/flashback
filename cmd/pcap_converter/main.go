@@ -2,14 +2,14 @@
 package main
 
 import (
-	"fmt"
 	"flag"
-	"time"
+	"fmt"
 	"log"
 	"os"
+	"reflect"
 	"runtime"
 	"strings"
-	"reflect"
+	"time"
 
 	"github.com/ParsePlatform/flashback"
 	"github.com/google/gopacket/pcap"
