@@ -58,23 +58,20 @@ func (fbOp *Operation) handleQuery(opQuery *mongoproto.OpQuery, f *os.File) erro
 	var err error
 	fbOp.Ns = opQuery.FullCollectionName
 	fbOp.Type = flashback.Query
-	query, err := parseQuery(opQuery.Query)
-	if err != nil {
-		return err
-	}
 	if strings.HasSuffix(opQuery.FullCollectionName, ".$cmd") {
 		// sometimes mongoproto returns inserts as 'commands'
 		collection, exists := flashback.GetElem(fbOp.QueryDoc, "insert")
 		if exists == true {
 			opQuery.FullCollectionName = strings.Replace(opQuery.FullCollectionName, "$cmd", collection.(string), 1)
 			return fbOp.handleInsertFromQuery(opQuery, f)
-		} else {
-			return fbOp.handleCommand(opQuery, f)
-		}
-	} else {
-		fbOp.QueryDoc = query
-		return fbOp.writeOp(f)
+		} 
+		return fbOp.handleCommand(opQuery, f)
 	}
+	fbOp.QueryDoc, err = parseQuery(opQuery.Query)
+	if err != nil {
+		return err
+	}
+	return fbOp.writeOp(f)
 }
 
 func (fbOp *Operation) handleInsertDocument(ns string, document bson.D, f *os.File) error {
@@ -85,7 +82,6 @@ func (fbOp *Operation) handleInsertDocument(ns string, document bson.D, f *os.Fi
 }
 
 func (fbOp *Operation) handleInsert(opInsert *mongoproto.OpInsert, f *os.File) error {
-	var err error
 	fbOp.Ns = opInsert.FullCollectionName
 	if opInsert.Documents != nil {
 		for _, document := range opInsert.Documents {
@@ -99,11 +95,10 @@ func (fbOp *Operation) handleInsert(opInsert *mongoproto.OpInsert, f *os.File) e
 			}
 		}
 	}
-	return err
+	return nil
 }
 
 func (fbOp *Operation) handleInsertFromQuery(opQuery *mongoproto.OpQuery, f *os.File) error {
-	var inserts []bson.D
 	fbOp.Ns = opQuery.FullCollectionName
 	query, err := parseQuery(opQuery.Query)
 	if err != nil {
@@ -113,16 +108,19 @@ func (fbOp *Operation) handleInsertFromQuery(opQuery *mongoproto.OpQuery, f *os.
 	if exists == true {
 		if (reflect.TypeOf(documents).Kind() == reflect.Slice) {
 			for _, document := range documents.([]interface{}) {
-				inserts = append(inserts, document.(bson.D))
+				err = fbOp.handleInsertDocument(fbOp.Ns, document.(bson.D), f)
+				if err != nil {
+					return err
+				}
 			}
 		} else {
-			inserts = append(inserts, documents.(bson.D))
+			err = fbOp.handleInsertDocument(fbOp.Ns, documents.(bson.D), f)
+			if err != nil {
+				return err
+			}
 		}
 	} 
-	for _, insert := range inserts {
-		err = fbOp.handleInsertDocument(fbOp.Ns, insert, f)
-	}
-	return fbOp.writeOp(f) 
+	return nil
 }
 
 func (fbOp *Operation) handleDelete(opDelete *mongoproto.OpDelete, f *os.File) error {
@@ -165,14 +163,12 @@ func main() {
 		}
 		defer f.Close()
 		for op := range m.Ops {
-			// todo: fix mongoproto.OpUpdate and mongoproto.OpDelete so they can be added
 			var err error
 			fbOp := &Operation{
 				Timestamp: op.Seen,
 			}
-			if opDelete, ok := op.Op.(*mongoproto.OpDelete); ok {
-				err = fbOp.handleDelete(opDelete, f)
-			} else if opInsert, ok := op.Op.(*mongoproto.OpInsert); ok {
+			// todo: fix mongoproto.OpUpdate and mongoproto.OpDelete so they can be added
+			if opInsert, ok := op.Op.(*mongoproto.OpInsert); ok {
 				err = fbOp.handleInsert(opInsert, f)
 			} else if opQuery, ok := op.Op.(*mongoproto.OpQuery); ok {
 				err = fbOp.handleQuery(opQuery, f)
