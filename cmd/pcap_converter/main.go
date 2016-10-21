@@ -74,8 +74,7 @@ func (fbOp *Operation) handleQuery(opQuery *mongoproto.OpQuery, f *os.File) erro
 	return fbOp.writeOp(f)
 }
 
-func (fbOp *Operation) handleInsertDocument(ns string, document bson.D, f *os.File) error {
-	fbOp.Ns = ns
+func (fbOp *Operation) handleInsertDocument(document bson.D, f *os.File) error {
 	fbOp.Type = flashback.Insert
 	fbOp.InsertDoc = document
 	return fbOp.writeOp(f)
@@ -89,7 +88,7 @@ func (fbOp *Operation) handleInsert(opInsert *mongoproto.OpInsert, f *os.File) e
 			if err != nil {
 				return err
 			}
-			err = fbOp.handleInsertDocument(fbOp.Ns, insert, f)
+			err = fbOp.handleInsertDocument(insert, f)
 			if err != nil {
 				return err
 			}
@@ -108,13 +107,13 @@ func (fbOp *Operation) handleInsertFromQuery(opQuery *mongoproto.OpQuery, f *os.
 	if exists == true {
 		if (reflect.TypeOf(documents).Kind() == reflect.Slice) {
 			for _, document := range documents.([]interface{}) {
-				err = fbOp.handleInsertDocument(fbOp.Ns, document.(bson.D), f)
+				err = fbOp.handleInsertDocument(document.(bson.D), f)
 				if err != nil {
 					return err
 				}
 			}
 		} else {
-			err = fbOp.handleInsertDocument(fbOp.Ns, documents.(bson.D), f)
+			err = fbOp.handleInsertDocument(documents.(bson.D), f)
 			if err != nil {
 				return err
 			}
