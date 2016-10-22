@@ -135,8 +135,11 @@ func (fbOp *Operation) handleDelete(opDelete *mongoproto.OpDelete, f *os.File) e
 
 func (op *Operation) writeOp(f *os.File) error {
 	opBson, err := bson.Marshal(op)
+	if err != nil {
+		return err
+	}
 	f.Write(opBson)
-	return err
+	return nil
 }
 
 func main() {
