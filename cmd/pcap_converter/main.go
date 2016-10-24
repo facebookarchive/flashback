@@ -38,57 +38,57 @@ type Operation struct {
 	Type		flashback.OpType	`bson:"op"`
 }
 
-func parseQuery(opQuery []byte) (bson.D, error) {
+func ParseQuery(opQuery []byte) (bson.D, error) {
 	var query bson.D
 	err := bson.Unmarshal(opQuery, &query)
 	return query, err
 }
 
-func (fbOp *Operation) handleCommand(opCommand *mongoproto.OpQuery, f *os.File) error {
+func (op *Operation) HandleCommand(opCommand *mongoproto.OpQuery, f *os.File) error {
 	var err error
-	fbOp.Type = flashback.Command
-	fbOp.CommandDoc, err = parseQuery(opCommand.Query)
+	op.Type = flashback.Command
+	op.CommandDoc, err = ParseQuery(opCommand.Query)
 	if err != nil {
 		return err
 	}
-	return fbOp.writeOp(f)
+	return op.Write(f)
 }
 
-func (fbOp *Operation) handleQuery(opQuery *mongoproto.OpQuery, f *os.File) error {
+func (op *Operation) HandleQuery(opQuery *mongoproto.OpQuery, f *os.File) error {
 	var err error
-	fbOp.Ns = opQuery.FullCollectionName
-	fbOp.Type = flashback.Query
+	op.Ns = opQuery.FullCollectionName
+	op.Type = flashback.Query
 	if strings.HasSuffix(opQuery.FullCollectionName, ".$cmd") {
 		// sometimes mongoproto returns inserts as 'commands'
-		collection, exists := flashback.GetElem(fbOp.QueryDoc, "insert")
+		collection, exists := flashback.GetElem(op.QueryDoc, "insert")
 		if exists == true {
 			opQuery.FullCollectionName = strings.Replace(opQuery.FullCollectionName, "$cmd", collection.(string), 1)
-			return fbOp.handleInsertFromQuery(opQuery, f)
+			return op.HandleInsertFromQuery(opQuery, f)
 		} 
-		return fbOp.handleCommand(opQuery, f)
+		return op.HandleCommand(opQuery, f)
 	}
-	fbOp.QueryDoc, err = parseQuery(opQuery.Query)
+	op.QueryDoc, err = ParseQuery(opQuery.Query)
 	if err != nil {
 		return err
 	}
-	return fbOp.writeOp(f)
+	return op.Write(f)
 }
 
-func (fbOp *Operation) handleInsertDocument(document bson.D, f *os.File) error {
-	fbOp.Type = flashback.Insert
-	fbOp.InsertDoc = document
-	return fbOp.writeOp(f)
+func (op *Operation) HandleInsertDocument(document bson.D, f *os.File) error {
+	op.Type = flashback.Insert
+	op.InsertDoc = document
+	return op.Write(f)
 }
 
-func (fbOp *Operation) handleInsert(opInsert *mongoproto.OpInsert, f *os.File) error {
-	fbOp.Ns = opInsert.FullCollectionName
+func (op *Operation) HandleInsert(opInsert *mongoproto.OpInsert, f *os.File) error {
+	op.Ns = opInsert.FullCollectionName
 	if opInsert.Documents != nil {
 		for _, document := range opInsert.Documents {
-			insert, err := parseQuery(document)
+			insert, err := ParseQuery(document)
 			if err != nil {
 				return err
 			}
-			err = fbOp.handleInsertDocument(insert, f)
+			err = op.HandleInsertDocument(insert, f)
 			if err != nil {
 				return err
 			}
@@ -97,9 +97,9 @@ func (fbOp *Operation) handleInsert(opInsert *mongoproto.OpInsert, f *os.File) e
 	return nil
 }
 
-func (fbOp *Operation) handleInsertFromQuery(opQuery *mongoproto.OpQuery, f *os.File) error {
-	fbOp.Ns = opQuery.FullCollectionName
-	query, err := parseQuery(opQuery.Query)
+func (op *Operation) HandleInsertFromQuery(opQuery *mongoproto.OpQuery, f *os.File) error {
+	op.Ns = opQuery.FullCollectionName
+	query, err := ParseQuery(opQuery.Query)
 	if err != nil {
 		return err
 	}
@@ -107,13 +107,13 @@ func (fbOp *Operation) handleInsertFromQuery(opQuery *mongoproto.OpQuery, f *os.
 	if exists == true {
 		if (reflect.TypeOf(documents).Kind() == reflect.Slice) {
 			for _, document := range documents.([]interface{}) {
-				err = fbOp.handleInsertDocument(document.(bson.D), f)
+				err = op.HandleInsertDocument(document.(bson.D), f)
 				if err != nil {
 					return err
 				}
 			}
 		} else {
-			err = fbOp.handleInsertDocument(documents.(bson.D), f)
+			err = op.HandleInsertDocument(documents.(bson.D), f)
 			if err != nil {
 				return err
 			}
@@ -122,18 +122,18 @@ func (fbOp *Operation) handleInsertFromQuery(opQuery *mongoproto.OpQuery, f *os.
 	return nil
 }
 
-func (fbOp *Operation) handleDelete(opDelete *mongoproto.OpDelete, f *os.File) error {
+func (op *Operation) HandleDelete(opDelete *mongoproto.OpDelete, f *os.File) error {
 	var err error
-	fbOp.Type = flashback.Remove
-	fbOp.Ns = opDelete.FullCollectionName
-	fbOp.QueryDoc, err = parseQuery(opDelete.Selector)
+	op.Type = flashback.Remove
+	op.Ns = opDelete.FullCollectionName
+	op.QueryDoc, err = ParseQuery(opDelete.Selector)
 	if err != nil {
 		return err
 	}
-	return fbOp.writeOp(f)
+	return op.Write(f)
 }
 
-func (op *Operation) writeOp(f *os.File) error {
+func (op *Operation) Write(f *os.File) error {
 	opBson, err := bson.Marshal(op)
 	if err != nil {
 		return err
@@ -171,9 +171,9 @@ func main() {
 			}
 			// todo: fix mongoproto.OpUpdate and mongoproto.OpDelete so they can be added
 			if opInsert, ok := op.Op.(*mongoproto.OpInsert); ok {
-				err = fbOp.handleInsert(opInsert, f)
+				err = fbOp.HandleInsert(opInsert, f)
 			} else if opQuery, ok := op.Op.(*mongoproto.OpQuery); ok {
-				err = fbOp.handleQuery(opQuery, f)
+				err = fbOp.HandleQuery(opQuery, f)
 			} else if *debug == true {
 				if _, ok := op.Op.(*mongoproto.OpUnknown); ok {
 					fmt.Println("Found mongoproto.OpUnknown operation: ", op)
