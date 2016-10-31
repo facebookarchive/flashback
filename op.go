@@ -41,14 +41,14 @@ type Op struct {
 	Ns         string    `bson:"ns"`
 	Timestamp  time.Time `bson:"ts"`
 	Type       OpType    `bson:"op"`
-	NToSkip    int64     `bson:"ntoskip"`
-	NToReturn  int64     `bson:"ntoreturn"`
-	QueryDoc   bson.D    `bson:"query"`
-	CommandDoc bson.D    `bson:"command"`
-	InsertDoc  bson.D    `bson:"o"`
-	UpdateDoc  bson.D    `bson:"updateobj"`
-	Database   string
-	Collection string
+	NToSkip    int64     `bson:"ntoskip,omitempty"`
+	NToReturn  int64     `bson:"ntoreturn,omitempty"`
+	QueryDoc   bson.D    `bson:"query,omitempty"`
+	CommandDoc bson.D    `bson:"command,omitempty"`
+	InsertDoc  bson.D    `bson:"o,omitempty"`
+	UpdateDoc  bson.D    `bson:"updateobj,omitempty"`
+	Database   string    `bson:",omitempty"`
+	Collection string    `bson:",omitempty"`
 }
 
 // GetElem is a helper to fetch a specific key from bson.D
