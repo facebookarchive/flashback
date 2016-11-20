@@ -169,7 +169,7 @@ func main() {
 				}
 			}
 			if err != nil {
-				logger.Println(err)
+				logger.Println("Error with", fbOp.Type, "operation:", err)
 				if !*continueOnError {
 					os.Exit(1)
 				}
