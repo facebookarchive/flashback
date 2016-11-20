@@ -88,7 +88,7 @@ For a full list of options:
 
 pcap_converter is an experimental way to build a recorded ops file from a pcap of mongo traffic.
 
-*Note: 'update', 'remove' and 'getmore' operations are not yet supported by pcap_converter*
+*Note: 'getmore' operations are not yet supported by pcap_converter*
 
 ```sh
 $ go get github.com/ParsePlatform/flashback/cmd/pcap_converter
