@@ -59,7 +59,7 @@ func init() {
 	flag.StringVar(&url,
 		"url",
 		"",
-		"[Optional] The database server's url, in the format of <host>[:<port>]. Defaults to localhost:27017")
+		"[Optional] The database server's url, in the format of mongodb://[<user>:<password>@]<host>[:<port>]. Defaults to mongodb://localhost:27017")
 	flag.StringVar(&challengerUrl,
 		"challenger_url",
 		"",
@@ -299,8 +299,22 @@ func main() {
 		workerStates := make([]nodeWorkerState, len(nodes))
 
 		for i, n := range nodes {
-			session, err := mgo.Dial(n.url)
+			dialInfo, err := mgo.ParseURL(n.url)
 			panicOnError(err)
+			session, err := mgo.DialWithInfo(dialInfo)
+			panicOnError(err)
+			if dialInfo.Username != "" && dialInfo.Password != "" {
+				credentials := &mgo.Credential{
+					Username: dialInfo.Username,
+					Password: dialInfo.Password,
+				}
+				credentials.Source = dialInfo.Database
+				if dialInfo.Source != "" {
+					credentials.Source = dialInfo.Source
+				}
+				err = session.Login(credentials)
+				panicOnError(err)
+			}
 			session.SetSocketTimeout(time.Duration(socketTimeout))
 			defer session.Close()
 			workerStates[i] = nodeWorkerState{
