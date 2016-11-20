@@ -304,6 +304,7 @@ func main() {
 			session, err := mgo.DialWithInfo(dialInfo)
 			panicOnError(err)
 			session.SetSocketTimeout(time.Duration(socketTimeout))
+			defer session.Close()
 			if dialInfo.Username != "" && dialInfo.Password != "" {
 				credentials := &mgo.Credential{
 					Username: dialInfo.Username,
@@ -316,7 +317,6 @@ func main() {
 				err = session.Login(credentials)
 				panicOnError(err)
 			}
-			defer session.Close()
 			workerStates[i] = nodeWorkerState{
 				n.name,
 				session,
