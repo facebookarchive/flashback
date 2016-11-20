@@ -307,8 +307,8 @@ func main() {
 				credentials := &mgo.Credential{
 					Username: dialInfo.Username,
 					Password: dialInfo.Password,
+					Source:   dialInfo.Database,
 				}
-				credentials.Source = dialInfo.Database
 				if dialInfo.Source != "" {
 					credentials.Source = dialInfo.Source
 				}
