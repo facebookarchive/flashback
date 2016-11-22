@@ -109,6 +109,21 @@ func HandleInsertFromQuery(op *flashback.Op, opQuery *mongoproto.OpQuery, f *os.
 	return nil
 }
 
+func HandleUpdate(op *flashback.Op, opUpdate *mongoproto.OpUpdate, f *os.File) error {
+	var err error
+	op.Type = flashback.Update
+	op.Ns = opUpdate.FullCollectionName
+	op.QueryDoc, err = ParseQuery(opUpdate.Selector)
+	if err != nil {
+		return err
+	}
+	op.UpdateDoc, err = ParseQuery(opUpdate.Update)
+	if err != nil {
+		return err
+	}
+	return Write(op, f)
+}
+
 func HandleDelete(op *flashback.Op, opDelete *mongoproto.OpDelete, f *os.File) error {
 	var err error
 	op.Type = flashback.Remove
@@ -156,9 +171,13 @@ func main() {
 			fbOp := &flashback.Op{
 				Timestamp: op.Seen,
 			}
-			// todo: fix mongoproto.OpUpdate and mongoproto.OpDelete so they can be added
+			// TODO: add mongoproto.OpGetMore (if possible)
 			if opInsert, ok := op.Op.(*mongoproto.OpInsert); ok {
 				err = HandleInsert(fbOp, opInsert, f)
+			} else if opUpdate, ok := op.Op.(*mongoproto.OpUpdate); ok {
+				err = HandleUpdate(fbOp, opUpdate, f)
+			} else if opDelete, ok := op.Op.(*mongoproto.OpDelete); ok {
+				err = HandleDelete(fbOp, opDelete, f)
 			} else if opQuery, ok := op.Op.(*mongoproto.OpQuery); ok {
 				err = HandleQuery(fbOp, opQuery, f)
 			} else if *debug == true {
