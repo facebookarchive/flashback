@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -333,6 +334,11 @@ func main() {
 						logger.Error(fmt.Sprintf(
 							"[%s] error executing op - type:%s,database:%s,collection:%s,error:%s", name,
 							op.Type, op.Database, op.Collection, err))
+					} else if strings.HasPrefix(err.Error(), "not authorized") {
+						logger.Error(fmt.Sprintf(
+							"[%s] not authorized to execute op - type:%s,database:%s", name, op.Type,
+							op.Database))
+						exit <- 1
 					}
 				}
 			}
