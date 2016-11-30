@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -59,7 +60,7 @@ func init() {
 	flag.StringVar(&url,
 		"url",
 		"",
-		"[Optional] The database server's url, in the format of <host>[:<port>]. Defaults to localhost:27017")
+		"[Optional] The database server's url, in the format of mongodb://[<user>:<password>@]<host>[:<port>]. Defaults to mongodb://localhost:27017")
 	flag.StringVar(&challengerUrl,
 		"challenger_url",
 		"",
@@ -299,7 +300,9 @@ func main() {
 		workerStates := make([]nodeWorkerState, len(nodes))
 
 		for i, n := range nodes {
-			session, err := mgo.Dial(n.url)
+			dialInfo, err := mgo.ParseURL(n.url)
+			panicOnError(err)
+			session, err := mgo.DialWithInfo(dialInfo)
 			panicOnError(err)
 			session.SetSocketTimeout(time.Duration(socketTimeout))
 			defer session.Close()
@@ -331,6 +334,11 @@ func main() {
 						logger.Error(fmt.Sprintf(
 							"[%s] error executing op - type:%s,database:%s,collection:%s,error:%s", name,
 							op.Type, op.Database, op.Collection, err))
+					} else if strings.HasPrefix(err.Error(), "not authorized") {
+						logger.Error(fmt.Sprintf(
+							"[%s] not authorized to execute op - type:%s,database:%s", name, op.Type,
+							op.Database))
+						exit <- 1
 					}
 				}
 			}
