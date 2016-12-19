@@ -65,19 +65,19 @@ func init() {
 		"challenger_url",
 		"",
 		"[Optional] Url of the challenger, another mongo database configured with different parameters. "+
-			"Queries will be sent into both simultaneously Format: <host>[:<port>]. Not used by default. "+
+			"Queries will be sent into both simultaneously Format: mongodb://[<user>:<password>@]<host>[:<port>]. Not used by default. "+
 			"Supported by only \"real\" style")
 	flag.StringVar(&challengerUrl2,
 		"challenger_url2",
 		"",
 		"[Optional] Url of the challenger2, another mongo database configured with different parameters. "+
-			"Queries will be sent into both simultaneously Format: <host>[:<port>]. Not used by default. "+
+			"Queries will be sent into both simultaneously Format: mongodb://[<user>:<password>@]<host>[:<port>]. Not used by default. "+
 			"Supported by only \"real\" style")
 	flag.StringVar(&challengerUrl3,
 		"challenger_url3",
 		"",
 		"[Optional] Url of the challenger3, another mongo database configured with different parameters. "+
-			"Queries will be sent into both simultaneously Format: <host>[:<port>]. Not used by default. "+
+			"Queries will be sent into both simultaneously Format: mongodb://[<user>:<password>@]<host>[:<port>]. Not used by default. "+
 			"Supported by only \"real\" style")
 	flag.StringVar(&style,
 		"style",
